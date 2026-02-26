@@ -27,13 +27,14 @@ const titleFromClip = (text: string | null, fallback: string) => {
 
 export async function getHistoryItems(service: ServiceType): Promise<HistoryItem[]> {
   const session = await auth();
-  if (!session?.user.id) {
+  const userId = session?.user?.id;
+  if (!userId) {
     return [] as HistoryItem[];
   }
 
   const clips = await db.generatedAudioClip.findMany({
     where: {
-      userId: session.user.id,
+      userId: userId,
       service,
       failed: false,
       s3Key: {

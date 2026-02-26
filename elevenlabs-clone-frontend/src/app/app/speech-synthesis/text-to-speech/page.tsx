@@ -7,7 +7,7 @@ import { TextToSpeechEditor } from "../../../../components/client/speech-synthes
 
 export default async function TextToSpeechPage() {
   const session = await auth();
-  const userId = session?.user.id;
+  const userId = session?.user?.id;
 
   let credits = 0;
 

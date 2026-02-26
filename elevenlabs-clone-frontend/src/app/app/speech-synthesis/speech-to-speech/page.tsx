@@ -7,7 +7,7 @@ import { db } from "~/server/db";
 
 export default async function SpeechToSpeechPage() {
   const session = await auth();
-  const userId = session?.user.id;
+  const userId = session?.user?.id;
 
   let credits = 0;
 

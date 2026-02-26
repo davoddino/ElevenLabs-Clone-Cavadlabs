@@ -33,6 +33,8 @@ declare module "next-auth" {
  * @see https://next-auth.js.org/configuration/options
  */
 export const authConfig = {
+  // Dev fallback to avoid MissingSecret in local setups.
+  secret: process.env.AUTH_SECRET ?? "dev-local-auth-secret",
   providers: [
     Credentials({
       name: "credentials",
