@@ -24,3 +24,4 @@ FastAPI wrapper around local `Qwen/Qwen3-TTS-0.6B` inference.
 - `QWEN_TTS_MAX_TEXT_LENGTH` (default `3000`)
 - `QWEN_TTS_MAX_NEW_TOKENS` (default `2048`)
 - `QWEN_TTS_SAMPLE_RATE` (default `24000`)
+- `DISABLE_API_KEY_AUTH=true` to disable Authorization checks in local dev

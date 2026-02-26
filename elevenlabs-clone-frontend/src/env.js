@@ -19,7 +19,7 @@ export const env = createEnv({
     AWS_SECRET_ACCESS_KEY: z.string(),
     AWS_REGION: z.string(),
     S3_BUCKET_NAME: z.string(),
-    BACKEND_API_KEY: z.string(),
+    BACKEND_API_KEY: z.string().optional(),
     STYLETTS2_API_ROUTE: z.string(),
     QWEN_TTS_API_ROUTE: z.string().optional(),
     SEED_VC_API_ROUTE: z.string(),

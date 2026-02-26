@@ -18,6 +18,8 @@ services:
     build:
       context: ./qwen-tts
       dockerfile: Dockerfile.api
+    environment:
+      DISABLE_API_KEY_AUTH: "true"
     ports:
       - '8003:8000'
     restart: unless-stopped

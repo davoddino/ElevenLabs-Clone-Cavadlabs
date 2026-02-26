@@ -32,14 +32,17 @@ export const aiGenerationFunction = inngest.createFunction(
 
     const result = await step.run("call-api", async () => {
       let response: Response | null = null;
+      const headers = {
+        "Content-Type": "application/json",
+        ...(env.BACKEND_API_KEY
+          ? { Authorization: env.BACKEND_API_KEY }
+          : {}),
+      };
 
       if (audioClip.service === "styletts2") {
         response = await fetch(env.STYLETTS2_API_ROUTE + "/generate", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: env.BACKEND_API_KEY,
-          },
+          headers,
           body: JSON.stringify({
             text: audioClip.text,
             target_voice: audioClip.voice,
@@ -54,10 +57,7 @@ export const aiGenerationFunction = inngest.createFunction(
 
         response = await fetch(env.QWEN_TTS_API_ROUTE + "/generate", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: env.BACKEND_API_KEY,
-          },
+          headers,
           body: JSON.stringify({
             text: audioClip.text,
             target_voice: audioClip.voice,
@@ -66,10 +66,7 @@ export const aiGenerationFunction = inngest.createFunction(
       } else if (audioClip.service === "seedvc") {
         response = await fetch(env.SEED_VC_API_ROUTE + "/convert", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: env.BACKEND_API_KEY,
-          },
+          headers,
           body: JSON.stringify({
             source_audio_key: audioClip.originalVoiceS3Key,
             target_voice: audioClip.voice,
@@ -78,10 +75,7 @@ export const aiGenerationFunction = inngest.createFunction(
       } else if (audioClip.service === "make-an-audio") {
         response = await fetch(env.MAKE_AN_AUDIO_API_ROUTE + "/generate", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: env.BACKEND_API_KEY,
-          },
+          headers,
           body: JSON.stringify({
             prompt: audioClip.text,
           }),

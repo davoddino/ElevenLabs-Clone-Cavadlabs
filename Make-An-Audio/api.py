@@ -22,12 +22,16 @@ logger = logging.getLogger(__name__)
 sampler = None
 vocoder = None
 API_KEY = os.getenv("API_KEY")
+AUTH_DISABLED = os.getenv("DISABLE_API_KEY_AUTH", "false").lower() == "true"
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 
 
 async def verify_api_key(authorization: str = Header(None)):
+    if AUTH_DISABLED or not API_KEY:
+        return "auth-disabled"
+
     if not authorization:
         logger.warning("No API key provided")
         raise HTTPException(status_code=401, detail="API key is missing")

@@ -60,7 +60,8 @@ docker compose up -d qwen-tts-api
 ```bash
 QWEN_TTS_API_ROUTE=http://localhost:8003
 TTS_DEFAULT_SERVICE=qwen-tts
-BACKEND_API_KEY=your_internal_api_key
+# Optional if DISABLE_API_KEY_AUTH=true on backend
+BACKEND_API_KEY=
 ```
 
 3. The first startup may download the model weights (`Qwen/Qwen3-TTS-0.6B`) into cache.

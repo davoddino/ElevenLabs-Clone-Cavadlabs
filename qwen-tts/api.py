@@ -17,6 +17,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("API_KEY")
+AUTH_DISABLED = os.getenv("DISABLE_API_KEY_AUTH", "false").lower() == "true"
 MODEL_ID = os.getenv("QWEN_TTS_MODEL_ID", "Qwen/Qwen3-TTS-0.6B")
 SAMPLE_RATE = int(os.getenv("QWEN_TTS_SAMPLE_RATE", "24000"))
 MAX_TEXT_LENGTH = int(os.getenv("QWEN_TTS_MAX_TEXT_LENGTH", "3000"))
@@ -35,6 +36,9 @@ qwen_processor = None
 
 
 async def verify_api_key(authorization: str = Header(None)):
+    if AUTH_DISABLED or not API_KEY:
+        return "auth-disabled"
+
     if not authorization:
         logger.warning("No API key provided")
         raise HTTPException(status_code=401, detail="API key is missing")
