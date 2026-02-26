@@ -1,5 +1,5 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 
 export default function HomePage() {
-  return <h1>For a landing page</h1>;
+  redirect("/app/speech-synthesis/text-to-speech");
 }
