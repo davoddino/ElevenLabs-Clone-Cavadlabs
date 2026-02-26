@@ -1,1 +1,5 @@
-export type ServiceType = "styletts2" | "seedvc" | "make-an-audio";
+export type ServiceType =
+  | "styletts2"
+  | "qwen-tts"
+  | "seedvc"
+  | "make-an-audio";

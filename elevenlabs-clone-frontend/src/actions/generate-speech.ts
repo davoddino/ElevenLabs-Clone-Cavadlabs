@@ -7,7 +7,11 @@ import { auth } from "~/server/auth";
 import { db } from "~/server/db";
 import { ServiceType } from "~/types/services";
 
-export async function generateTextToSpeech(text: string, voice: string) {
+export async function generateTextToSpeech(
+  text: string,
+  voice: string,
+  service: "styletts2" | "qwen-tts" = "styletts2",
+) {
   const session = await auth();
   if (!session?.user.id) {
     throw new Error("User not authenticated");
@@ -22,7 +26,7 @@ export async function generateTextToSpeech(text: string, voice: string) {
           id: session.user.id,
         },
       },
-      service: "styletts2",
+      service: service,
     },
   });
 
@@ -161,6 +165,7 @@ export async function generationStatus(
 const revalidateBasedOnService = async (service: ServiceType) => {
   switch (service) {
     case "styletts2":
+    case "qwen-tts":
       revalidatePath("/app/speech-synthesis/text-to-speech");
       break;
     case "seedvc":

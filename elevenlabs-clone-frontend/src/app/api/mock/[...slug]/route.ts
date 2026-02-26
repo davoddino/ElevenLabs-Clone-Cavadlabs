@@ -5,6 +5,9 @@ const services = {
   styletts2: {
     voices: ["andreas", "woman"],
   },
+  "qwen-tts": {
+    voices: ["Cherry", "Chelsie", "Ethan"],
+  },
   "seed-vc": {
     voices: ["andreas", "woman", "trump"],
   },

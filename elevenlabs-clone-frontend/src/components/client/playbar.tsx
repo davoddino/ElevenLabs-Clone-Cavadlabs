@@ -65,8 +65,9 @@ export default function Playbar() {
   }, [currentAudio, setDuration, setIsPlaying, setProgress]);
 
   const styleTTS2Voices = getVoices("styletts2");
+  const qwenVoices = getVoices("qwen-tts");
   const seedVCVoices = getVoices("seedvc");
-  const allVoices = [...styleTTS2Voices, ...seedVCVoices];
+  const allVoices = [...styleTTS2Voices, ...qwenVoices, ...seedVCVoices];
   const voice = allVoices.find((v) => v.id === currentAudio?.voice);
 
   const formatTime = (seconds: number) => {

@@ -30,6 +30,24 @@ const voices: Voice[] = [
     service: "styletts2",
   },
   {
+    id: "Cherry",
+    name: "Cherry",
+    gradientColors: GRADIENT_COLORS[2]!,
+    service: "qwen-tts",
+  },
+  {
+    id: "Chelsie",
+    name: "Chelsie",
+    gradientColors: GRADIENT_COLORS[3]!,
+    service: "qwen-tts",
+  },
+  {
+    id: "Ethan",
+    name: "Ethan",
+    gradientColors: GRADIENT_COLORS[4]!,
+    service: "qwen-tts",
+  },
+  {
     id: "andreas",
     name: "Andreas",
     gradientColors: GRADIENT_COLORS[0]!,
@@ -51,6 +69,7 @@ const voices: Voice[] = [
 
 const defaultStyleTTS2Voice =
   voices.find((v) => v.service === "styletts2") ?? null;
+const defaultQwenVoice = voices.find((v) => v.service === "qwen-tts") ?? null;
 const defaultSeedVCVoice = voices.find((v) => v.service === "seedvc") ?? null;
 
 interface VoiceState {
@@ -65,6 +84,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   voices: voices,
   selectedVoices: {
     styletts2: defaultStyleTTS2Voice,
+    "qwen-tts": defaultQwenVoice,
     seedvc: defaultSeedVCVoice,
     "make-an-audio": null,
   },

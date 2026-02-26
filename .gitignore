@@ -91,3 +91,7 @@
 # Logs
 **/logs/
 **/*.log
+
+# Keep frontend utility library source tracked
+!elevenlabs-clone-frontend/src/lib/
+!elevenlabs-clone-frontend/src/lib/**

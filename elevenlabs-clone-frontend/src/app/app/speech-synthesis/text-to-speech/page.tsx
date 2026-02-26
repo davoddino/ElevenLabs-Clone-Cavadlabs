@@ -2,6 +2,7 @@ import { PageLayout } from "~/components/client/page-layout";
 import { getHistoryItems } from "~/lib/history";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
+import { env } from "~/env";
 import { TextToSpeechEditor } from "../../../../components/client/speech-synthesis/text-to-speech-editor";
 
 export default async function TextToSpeechPage() {
@@ -20,7 +21,7 @@ export default async function TextToSpeechPage() {
     credits = user?.credits ?? 0;
   }
 
-  const service = "styletts2";
+  const service = env.TTS_DEFAULT_SERVICE;
 
   const historyItems = await getHistoryItems(service);
 
@@ -31,7 +32,7 @@ export default async function TextToSpeechPage() {
       showSidebar={true}
       historyItems={historyItems}
     >
-      <TextToSpeechEditor service="styletts2" credits={credits} />
+      <TextToSpeechEditor service={service} credits={credits} />
     </PageLayout>
   );
 }

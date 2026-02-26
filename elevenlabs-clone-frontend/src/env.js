@@ -21,8 +21,12 @@ export const env = createEnv({
     S3_BUCKET_NAME: z.string(),
     BACKEND_API_KEY: z.string(),
     STYLETTS2_API_ROUTE: z.string(),
+    QWEN_TTS_API_ROUTE: z.string().optional(),
     SEED_VC_API_ROUTE: z.string(),
     MAKE_AN_AUDIO_API_ROUTE: z.string(),
+    TTS_DEFAULT_SERVICE: z
+      .enum(["styletts2", "qwen-tts"])
+      .default("qwen-tts"),
   },
 
   /**
@@ -48,8 +52,10 @@ export const env = createEnv({
     S3_BUCKET_NAME: process.env.S3_BUCKET_NAME,
     BACKEND_API_KEY: process.env.BACKEND_API_KEY,
     STYLETTS2_API_ROUTE: process.env.STYLETTS2_API_ROUTE,
+    QWEN_TTS_API_ROUTE: process.env.QWEN_TTS_API_ROUTE,
     SEED_VC_API_ROUTE: process.env.SEED_VC_API_ROUTE,
     MAKE_AN_AUDIO_API_ROUTE: process.env.MAKE_AN_AUDIO_API_ROUTE,
+    TTS_DEFAULT_SERVICE: process.env.TTS_DEFAULT_SERVICE,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

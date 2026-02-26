@@ -14,6 +14,21 @@ services:
               count: 1
               capabilities: [gpu]
 
+  qwen-tts-api:
+    build:
+      context: ./qwen-tts
+      dockerfile: Dockerfile.api
+    ports:
+      - '8003:8000'
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
   seedvc-api:
     image: bekzod47
     ports:

@@ -28,6 +28,7 @@ export function TextToSpeechEditor({
   service: ServiceType;
   credits: number;
 }) {
+  const characterLimit = service === "qwen-tts" ? 3000 : 5000;
   const [textContent, setTextContent] = useState("");
   const [activePlaceholder, setActivePlaceholder] = useState(
     "Start typing here or paste any text you want to turn into lifelike speech...",
@@ -46,7 +47,7 @@ export function TextToSpeechEditor({
       try {
         const status = await generationStatus(currentAudioId);
 
-        const selectedVoice = getSelectedVoice("styletts2");
+        const selectedVoice = getSelectedVoice(service);
         if (status.success && status.audioUrl && selectedVoice) {
           clearInterval(pollInterval);
           setLoading(false);
@@ -120,7 +121,7 @@ export function TextToSpeechEditor({
   };
 
   const handleGenerateSpeech = async () => {
-    const selectedVoice = getSelectedVoice("styletts2");
+    const selectedVoice = getSelectedVoice(service);
 
     if (textContent.trim().length === 0 || !selectedVoice) return;
 
@@ -129,6 +130,7 @@ export function TextToSpeechEditor({
       const { audioId, shouldShowThrottleAlert } = await generateTextToSpeech(
         textContent,
         selectedVoice?.id,
+        service === "qwen-tts" ? "qwen-tts" : "styletts2",
       );
 
       if (shouldShowThrottleAlert) {
@@ -209,7 +211,7 @@ export function TextToSpeechEditor({
           <GenerateButton
             onGenerate={handleGenerateSpeech}
             isDisabled={
-              textContent.length > 5000 ||
+              textContent.length > characterLimit ||
               textContent.trim().length === 0 ||
               loading
             }
@@ -218,7 +220,7 @@ export function TextToSpeechEditor({
             creditsRemaining={credits}
             showCredits={true}
             characterCount={textContent.length}
-            characterLimit={5000}
+            characterLimit={characterLimit}
           />
         )}
       </div>

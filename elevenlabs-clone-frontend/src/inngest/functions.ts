@@ -45,6 +45,24 @@ export const aiGenerationFunction = inngest.createFunction(
             target_voice: audioClip.voice,
           }),
         });
+      } else if (audioClip.service === "qwen-tts") {
+        if (!env.QWEN_TTS_API_ROUTE) {
+          throw new Error(
+            "QWEN_TTS_API_ROUTE is not configured but qwen-tts service was requested",
+          );
+        }
+
+        response = await fetch(env.QWEN_TTS_API_ROUTE + "/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: env.BACKEND_API_KEY,
+          },
+          body: JSON.stringify({
+            text: audioClip.text,
+            target_voice: audioClip.voice,
+          }),
+        });
       } else if (audioClip.service === "seedvc") {
         response = await fetch(env.SEED_VC_API_ROUTE + "/convert", {
           method: "POST",

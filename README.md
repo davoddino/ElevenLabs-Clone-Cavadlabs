@@ -7,6 +7,7 @@
 This is a full-stack, self-hosted clone of ElevenLabs — your all-in-one AI audio generation playground. 🔥 Instead of relying on external APIs, we host our own cutting-edge models for:
 
 - **🔊 Text-to-Speech (TTS)** with **StyleTTS2**
+- **🗣️ Local neural TTS** with **Qwen3-TTS** (optional)
 - **🎭 Voice Conversion** with **Seed-VC**
 - **🎵 Text-to-Audio** with **Make-An-Audio**
 
@@ -17,6 +18,7 @@ All models are fine-tuned for custom voices, containerized via Docker 🐳, and 
 ## ✨ Features at a Glance
 
 - 🔊 **StyleTTS2** for lifelike text-to-speech
+- 🗣️ **Qwen3-TTS** for local high-quality TTS
 - 🎭 **Seed-VC** for seamless voice cloning
 - 🎵 **Make-An-Audio** for creative audio generation
 - 🧠 Fine-tuning for unique voice identities
@@ -37,10 +39,31 @@ All models are fine-tuned for custom voices, containerized via Docker 🐳, and 
 
 | Purpose             | Model Name                                                             |
 | ------------------- | ---------------------------------------------------------------------- |
+| Local TTS (optional)| [`Qwen3-TTS-0.6B`](https://huggingface.co/Qwen/Qwen3-TTS-0.6B)        |
 | Voice-to-Voice      | [`seed-vc`](https://github.com/Plachtaa/seed-vc)                       |
 | Fine-tuned TTS      | [`StyleTTS2FineTune`](https://github.com/IIEleven11/StyleTTS2FineTune) |
 | Text-to-Speech      | [`StyleTTS2`](https://github.com/yl4579/StyleTTS2)                     |
 | Text-to-SFX / Audio | [`Make-an-audio`](https://github.com/Text-to-Audio/Make-An-Audio)      |
+
+---
+
+## 🗣️ Local Qwen TTS (No external API)
+
+This repo now includes a `qwen-tts` FastAPI service that runs **fully local inference** (no cloud TTS endpoint).
+
+1. Build and start the service:
+```bash
+docker compose up -d qwen-tts-api
+```
+
+2. Configure frontend `.env`:
+```bash
+QWEN_TTS_API_ROUTE=http://localhost:8003
+TTS_DEFAULT_SERVICE=qwen-tts
+BACKEND_API_KEY=your_internal_api_key
+```
+
+3. The first startup may download the model weights (`Qwen/Qwen3-TTS-0.6B`) into cache.
 
 ---
 
