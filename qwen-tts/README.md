@@ -12,7 +12,13 @@ FastAPI wrapper around local `Qwen/Qwen3-TTS-0.6B` inference.
 
 ## Required env vars
 
-- `API_KEY`
+- `STORAGE_BACKEND` (`local` or `s3`)
+- `API_KEY` (optional if `DISABLE_API_KEY_AUTH=true`)
+
+When `STORAGE_BACKEND=local`:
+- `LOCAL_STORAGE_ROOT` (default `/data/storage`)
+
+When `STORAGE_BACKEND=s3`:
 - `S3_BUCKET`
 - `AWS_REGION`
 - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (or IAM role)

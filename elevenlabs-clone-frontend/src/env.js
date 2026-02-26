@@ -15,15 +15,17 @@ export const env = createEnv({
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
-    AWS_ACCESS_KEY_ID: z.string(),
-    AWS_SECRET_ACCESS_KEY: z.string(),
-    AWS_REGION: z.string(),
-    S3_BUCKET_NAME: z.string(),
+    STORAGE_BACKEND: z.enum(["local", "s3"]).default("local"),
+    LOCAL_STORAGE_ROOT: z.string().optional(),
+    AWS_ACCESS_KEY_ID: z.string().optional(),
+    AWS_SECRET_ACCESS_KEY: z.string().optional(),
+    AWS_REGION: z.string().default("us-east-1"),
+    S3_BUCKET_NAME: z.string().optional(),
     BACKEND_API_KEY: z.string().optional(),
-    STYLETTS2_API_ROUTE: z.string(),
+    STYLETTS2_API_ROUTE: z.string().optional(),
     QWEN_TTS_API_ROUTE: z.string().optional(),
-    SEED_VC_API_ROUTE: z.string(),
-    MAKE_AN_AUDIO_API_ROUTE: z.string(),
+    SEED_VC_API_ROUTE: z.string().optional(),
+    MAKE_AN_AUDIO_API_ROUTE: z.string().optional(),
     TTS_DEFAULT_SERVICE: z
       .enum(["styletts2", "qwen-tts"])
       .default("qwen-tts"),
@@ -46,6 +48,8 @@ export const env = createEnv({
     AUTH_SECRET: process.env.AUTH_SECRET,
     DATABASE_URL: process.env.DATABASE_URL,
     NODE_ENV: process.env.NODE_ENV,
+    STORAGE_BACKEND: process.env.STORAGE_BACKEND,
+    LOCAL_STORAGE_ROOT: process.env.LOCAL_STORAGE_ROOT,
     AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
     AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
     AWS_REGION: process.env.AWS_REGION,

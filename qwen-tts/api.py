@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import uuid
 from contextlib import asynccontextmanager
 
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("API_KEY")
 AUTH_DISABLED = os.getenv("DISABLE_API_KEY_AUTH", "false").lower() == "true"
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").lower()
+LOCAL_STORAGE_ROOT = os.getenv("LOCAL_STORAGE_ROOT", "/data/storage")
 MODEL_ID = os.getenv("QWEN_TTS_MODEL_ID", "Qwen/Qwen3-TTS-0.6B")
 SAMPLE_RATE = int(os.getenv("QWEN_TTS_SAMPLE_RATE", "24000"))
 MAX_TEXT_LENGTH = int(os.getenv("QWEN_TTS_MAX_TEXT_LENGTH", "3000"))
@@ -69,7 +72,7 @@ def get_s3_client():
     return boto3.client("s3", **client_kwargs)
 
 
-s3_client = get_s3_client()
+s3_client = get_s3_client() if STORAGE_BACKEND == "s3" else None
 
 S3_PREFIX = os.getenv("S3_PREFIX", "qwen-tts-output")
 S3_BUCKET = os.getenv("S3_BUCKET", "elevenlabs-clone")
@@ -204,13 +207,24 @@ async def generate_speech(
         sf.write(local_path, audio, samplerate=SAMPLE_RATE)
 
         s3_key = f"{S3_PREFIX}/{output_filename}"
-        s3_client.upload_file(local_path, S3_BUCKET, s3_key)
+        presigned_url = ""
 
-        presigned_url = s3_client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": S3_BUCKET, "Key": s3_key},
-            ExpiresIn=3600,
-        )
+        if STORAGE_BACKEND == "s3":
+            if not s3_client:
+                raise RuntimeError("S3 client not initialized")
+
+            s3_client.upload_file(local_path, S3_BUCKET, s3_key)
+            presigned_url = s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": S3_BUCKET, "Key": s3_key},
+                ExpiresIn=3600,
+            )
+        else:
+            output_dir = os.path.join(LOCAL_STORAGE_ROOT, S3_PREFIX)
+            os.makedirs(output_dir, exist_ok=True)
+            final_path = os.path.join(output_dir, output_filename)
+            shutil.copyfile(local_path, final_path)
+            presigned_url = f"/api/storage/{s3_key}"
 
         background_tasks.add_task(os.remove, local_path)
 

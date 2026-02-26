@@ -22,6 +22,8 @@ ENV PYTHONPATH=/app
 ENV HF_HOME=/app/.cache/huggingface
 ENV TRANSFORMERS_CACHE=/app/.cache/huggingface
 
+ENV STORAGE_BACKEND=local
+ENV LOCAL_STORAGE_ROOT=/data/storage
 ENV AWS_REGION=us-east-1
 ENV S3_BUCKET=elevenlabs-clone
 ENV S3_PREFIX=qwen-tts-output

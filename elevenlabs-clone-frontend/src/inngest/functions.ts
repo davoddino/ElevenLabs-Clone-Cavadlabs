@@ -40,6 +40,12 @@ export const aiGenerationFunction = inngest.createFunction(
       };
 
       if (audioClip.service === "styletts2") {
+        if (!env.STYLETTS2_API_ROUTE) {
+          throw new Error(
+            "STYLETTS2_API_ROUTE is not configured but styletts2 service was requested",
+          );
+        }
+
         response = await fetch(env.STYLETTS2_API_ROUTE + "/generate", {
           method: "POST",
           headers,
@@ -64,6 +70,12 @@ export const aiGenerationFunction = inngest.createFunction(
           }),
         });
       } else if (audioClip.service === "seedvc") {
+        if (!env.SEED_VC_API_ROUTE) {
+          throw new Error(
+            "SEED_VC_API_ROUTE is not configured but seedvc service was requested",
+          );
+        }
+
         response = await fetch(env.SEED_VC_API_ROUTE + "/convert", {
           method: "POST",
           headers,
@@ -73,6 +85,12 @@ export const aiGenerationFunction = inngest.createFunction(
           }),
         });
       } else if (audioClip.service === "make-an-audio") {
+        if (!env.MAKE_AN_AUDIO_API_ROUTE) {
+          throw new Error(
+            "MAKE_AN_AUDIO_API_ROUTE is not configured but make-an-audio service was requested",
+          );
+        }
+
         response = await fetch(env.MAKE_AN_AUDIO_API_ROUTE + "/generate", {
           method: "POST",
           headers,
