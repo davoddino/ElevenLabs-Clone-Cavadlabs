@@ -502,7 +502,14 @@ async def generate_speech(
             "audio_url": presigned_url,
             "s3_key": s3_key,
         }
-    except HTTPException:
+    except HTTPException as error:
+        logger.warning(
+            "Request rejected: status=%s detail=%s target_voice=%s mode=%s",
+            error.status_code,
+            getattr(error, "detail", ""),
+            request.target_voice,
+            loaded_model_mode or MODEL_MODE,
+        )
         raise
     except Exception as error:
         logger.exception("Failed to generate Qwen TTS audio: %s", error)

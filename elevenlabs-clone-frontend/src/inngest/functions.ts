@@ -105,6 +105,7 @@ export const aiGenerationFunction = inngest.createFunction(
       }
 
       if (!response.ok) {
+        const errorBody = await response.text().catch(() => "");
         await db.generatedAudioClip.update({
           where: { id: audioClip.id },
           data: {
@@ -112,7 +113,10 @@ export const aiGenerationFunction = inngest.createFunction(
           },
         });
 
-        throw new Error("API error: " + response.statusText);
+        const errorDetail = errorBody ? ` | body=${errorBody}` : "";
+        throw new Error(
+          `API error: ${response.status} ${response.statusText}${errorDetail}`,
+        );
       }
 
       return response.json() as Promise<{ audio_url: string; s3_key: string }>;
