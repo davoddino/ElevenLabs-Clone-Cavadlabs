@@ -8,6 +8,23 @@ import boto3
 import numpy as np
 import soundfile as sf
 import torch
+
+# Compatibility shim for newer transformers with older torch builds.
+if (
+    hasattr(torch.utils, "_pytree")
+    and not hasattr(torch.utils._pytree, "register_pytree_node")
+    and hasattr(torch.utils._pytree, "_register_pytree_node")
+):
+    def _compat_register_pytree_node(*args, **kwargs):
+        try:
+            return torch.utils._pytree._register_pytree_node(*args, **kwargs)
+        except TypeError:
+            kwargs.pop("serialized_type_name", None)
+            kwargs.pop("flatten_with_keys_fn", None)
+            return torch.utils._pytree._register_pytree_node(*args, **kwargs)
+
+    torch.utils._pytree.register_pytree_node = _compat_register_pytree_node
+
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
