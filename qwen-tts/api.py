@@ -1,36 +1,20 @@
+import json
 import logging
 import os
 import shutil
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import boto3
 import numpy as np
 import soundfile as sf
 import torch
-
-# Compatibility shim for newer transformers with older torch builds.
-if (
-    hasattr(torch.utils, "_pytree")
-    and not hasattr(torch.utils._pytree, "register_pytree_node")
-    and hasattr(torch.utils._pytree, "_register_pytree_node")
-):
-    def _compat_register_pytree_node(*args, **kwargs):
-        try:
-            return torch.utils._pytree._register_pytree_node(*args, **kwargs)
-        except TypeError:
-            kwargs.pop("serialized_type_name", None)
-            kwargs.pop("flatten_with_keys_fn", None)
-            return torch.utils._pytree._register_pytree_node(*args, **kwargs)
-
-    torch.utils._pytree.register_pytree_node = _compat_register_pytree_node
-
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
-from qwen_omni_utils import process_mm_info
-from transformers import AutoProcessor, Qwen2_5OmniForConditionalGeneration
+from qwen_tts import Qwen3TTSModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,37 +46,115 @@ def _load_local_env_file() -> None:
         os.environ.setdefault(key, value)
 
 
-def _build_model_candidates(model_id: str) -> list[str]:
-    candidates = [model_id]
-    if model_id.endswith("-Base"):
-        candidates.append(f"{model_id[:-5]}-Instruct")
-    return candidates
+def _as_bool(raw: str | None, default: bool = False) -> bool:
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_voice_clone_presets(raw: str | None) -> dict[str, dict[str, str]]:
+    if not raw:
+        return {}
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as error:
+        logger.warning("Invalid QWEN_TTS_VOICE_CLONE_PRESETS JSON: %s", error)
+        return {}
+
+    if not isinstance(parsed, dict):
+        logger.warning("QWEN_TTS_VOICE_CLONE_PRESETS must be a JSON object")
+        return {}
+
+    presets: dict[str, dict[str, str]] = {}
+    for key, value in parsed.items():
+        if not isinstance(value, dict):
+            continue
+
+        ref_audio = value.get("ref_audio")
+        ref_text = value.get("ref_text")
+        language = value.get("language")
+
+        if isinstance(ref_audio, str) and ref_audio.strip():
+            preset = {"ref_audio": ref_audio.strip()}
+            if isinstance(ref_text, str) and ref_text.strip():
+                preset["ref_text"] = ref_text.strip()
+            if isinstance(language, str) and language.strip():
+                preset["language"] = language.strip()
+            presets[str(key)] = preset
+
+    return presets
+
+
+def _detect_model_mode(model_id: str, override: str | None) -> str:
+    if override:
+        normalized = override.strip().lower()
+        alias_map = {
+            "base": "base",
+            "voice_clone": "base",
+            "clone": "base",
+            "custom": "custom_voice",
+            "customvoice": "custom_voice",
+            "custom_voice": "custom_voice",
+            "design": "voice_design",
+            "voicedesign": "voice_design",
+            "voice_design": "voice_design",
+        }
+        if normalized in alias_map:
+            return alias_map[normalized]
+
+    lower_id = model_id.lower()
+    if "customvoice" in lower_id:
+        return "custom_voice"
+    if "voicedesign" in lower_id:
+        return "voice_design"
+    if "base" in lower_id:
+        return "base"
+
+    return "custom_voice"
 
 
 def _load_qwen_model(model_id: str):
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-    model_kwargs = {}
+
+    model_kwargs: dict[str, Any] = {"dtype": dtype}
     if torch.cuda.is_available():
-        model_kwargs["device_map"] = "auto"
+        model_kwargs["device_map"] = os.getenv("QWEN_TTS_DEVICE_MAP", "cuda:0")
+        attn_implementation = os.getenv("QWEN_TTS_ATTN_IMPLEMENTATION")
+        if attn_implementation:
+            model_kwargs["attn_implementation"] = attn_implementation
 
-    try:
-        model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
-            model_id,
-            dtype=dtype,
-            **model_kwargs,
-        )
-    except TypeError:
-        model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
-            model_id,
-            torch_dtype=dtype,
-            **model_kwargs,
-        )
+    return Qwen3TTSModel.from_pretrained(model_id, **model_kwargs)
 
-    if not torch.cuda.is_available():
-        model = model.to("cpu")
-    model.eval()
-    processor = AutoProcessor.from_pretrained(model_id)
-    return model, processor
+
+def _extract_first_audio(wavs: Any) -> np.ndarray:
+    if isinstance(wavs, torch.Tensor):
+        arr = wavs.detach().cpu().numpy()
+        if arr.ndim > 1:
+            arr = arr[0]
+        return np.asarray(arr, dtype=np.float32)
+
+    if isinstance(wavs, np.ndarray):
+        arr = wavs
+        if arr.ndim > 1:
+            arr = arr[0]
+        return np.asarray(arr, dtype=np.float32)
+
+    if isinstance(wavs, (list, tuple)) and len(wavs) > 0:
+        first = wavs[0]
+        if isinstance(first, torch.Tensor):
+            first = first.detach().cpu().numpy()
+        return np.asarray(first, dtype=np.float32)
+
+    raise RuntimeError("Unexpected audio output from Qwen3TTSModel")
+
+
+def _parse_voices(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+
+    voices = [segment.strip() for segment in raw.split(",") if segment.strip()]
+    return list(dict.fromkeys(voices))
 
 
 _load_local_env_file()
@@ -101,22 +163,32 @@ API_KEY = os.getenv("API_KEY")
 AUTH_DISABLED = os.getenv("DISABLE_API_KEY_AUTH", "false").lower() == "true"
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").lower()
 LOCAL_STORAGE_ROOT = os.getenv("LOCAL_STORAGE_ROOT", "/data/storage")
-MODEL_ID = os.getenv("QWEN_TTS_MODEL_ID", "Qwen/Qwen3-TTS-0.6B")
-SAMPLE_RATE = int(os.getenv("QWEN_TTS_SAMPLE_RATE", "24000"))
+MODEL_ID = os.getenv("QWEN_TTS_MODEL_ID", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")
+DEFAULT_LANGUAGE = os.getenv("QWEN_TTS_LANGUAGE", "Auto")
 MAX_TEXT_LENGTH = int(os.getenv("QWEN_TTS_MAX_TEXT_LENGTH", "3000"))
 MAX_NEW_TOKENS = int(os.getenv("QWEN_TTS_MAX_NEW_TOKENS", "2048"))
 
+# Applies only to Base model generation.
+X_VECTOR_ONLY_MODE = _as_bool(os.getenv("QWEN_TTS_X_VECTOR_ONLY_MODE"), False)
+BASE_REF_AUDIO = os.getenv("QWEN_TTS_BASE_REF_AUDIO", "").strip()
+BASE_REF_TEXT = os.getenv("QWEN_TTS_BASE_REF_TEXT", "").strip()
+BASE_REF_LANGUAGE = os.getenv("QWEN_TTS_BASE_REF_LANGUAGE", DEFAULT_LANGUAGE)
+
+# JSON map: {"VoiceName": {"ref_audio": "...", "ref_text": "...", "language": "English"}}
+VOICE_CLONE_PRESETS = _parse_voice_clone_presets(
+    os.getenv("QWEN_TTS_VOICE_CLONE_PRESETS")
+)
+
+MODEL_MODE = _detect_model_mode(MODEL_ID, os.getenv("QWEN_TTS_MODEL_MODE"))
+
 DEFAULT_VOICES = ["Cherry", "Chelsie", "Ethan", "Serena", "Dylan", "Jada"]
-SUPPORTED_VOICES = [
-    voice.strip()
-    for voice in os.getenv("QWEN_TTS_VOICES", ",".join(DEFAULT_VOICES)).split(",")
-    if voice.strip()
-]
+ENV_VOICES = _parse_voices(os.getenv("QWEN_TTS_VOICES"))
 
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 qwen_model = None
-qwen_processor = None
 loaded_model_id = None
+loaded_model_mode = None
+loaded_supported_speakers: list[str] = []
 
 
 async def verify_api_key(authorization: str = Header(None)):
@@ -159,105 +231,160 @@ S3_PREFIX = os.getenv("S3_PREFIX", "qwen-tts-output")
 S3_BUCKET = os.getenv("S3_BUCKET", "elevenlabs-clone")
 
 
-def _build_messages(text: str, voice: str):
-    instruction = (
-        "Generate the audio according to the following instruction: "
-        f"{text} Voice: {voice}"
+def _resolve_supported_voices() -> list[str]:
+    if loaded_model_mode == "custom_voice" and loaded_supported_speakers:
+        return loaded_supported_speakers
+
+    if loaded_model_mode == "base" and VOICE_CLONE_PRESETS:
+        return list(VOICE_CLONE_PRESETS.keys())
+
+    if ENV_VOICES:
+        return ENV_VOICES
+
+    if loaded_model_mode == "voice_design":
+        return ["VoiceDesign"]
+
+    return DEFAULT_VOICES
+
+
+def _resolve_base_prompt(request: "TextOnlyRequest") -> tuple[str, str | None, str]:
+    language = request.language or BASE_REF_LANGUAGE or DEFAULT_LANGUAGE
+
+    if request.ref_audio:
+        ref_text = request.ref_text.strip() if request.ref_text else None
+        if not ref_text and not X_VECTOR_ONLY_MODE:
+            raise HTTPException(
+                status_code=400,
+                detail="ref_text is required for Base model unless QWEN_TTS_X_VECTOR_ONLY_MODE=true",
+            )
+        return request.ref_audio, ref_text, language
+
+    if request.target_voice and request.target_voice in VOICE_CLONE_PRESETS:
+        preset = VOICE_CLONE_PRESETS[request.target_voice]
+        ref_audio = preset["ref_audio"]
+        ref_text = preset.get("ref_text")
+        preset_language = preset.get("language") or language
+
+        if not ref_text and not X_VECTOR_ONLY_MODE:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Preset '{request.target_voice}' is missing ref_text. "
+                    "Add ref_text or enable QWEN_TTS_X_VECTOR_ONLY_MODE=true"
+                ),
+            )
+
+        return ref_audio, ref_text, preset_language
+
+    if BASE_REF_AUDIO:
+        ref_text = request.ref_text.strip() if request.ref_text else (BASE_REF_TEXT or None)
+        if not ref_text and not X_VECTOR_ONLY_MODE:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "QWEN_TTS_BASE_REF_TEXT is required for Base model unless "
+                    "QWEN_TTS_X_VECTOR_ONLY_MODE=true"
+                ),
+            )
+        return BASE_REF_AUDIO, ref_text, language
+
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "Base model requires a reference voice. "
+            "Provide ref_audio/ref_text in request, or configure "
+            "QWEN_TTS_VOICE_CLONE_PRESETS / QWEN_TTS_BASE_REF_AUDIO(+REF_TEXT)."
+        ),
     )
-    return [
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": instruction},
-                {"type": "audio", "audio_url": "<|AUDIO|>"},
-            ],
+
+
+def _generate_audio(request: "TextOnlyRequest") -> tuple[np.ndarray, int]:
+    language = request.language or DEFAULT_LANGUAGE
+
+    if loaded_model_mode == "custom_voice":
+        speaker = request.target_voice or (_resolve_supported_voices()[0] if _resolve_supported_voices() else None)
+        if not speaker:
+            raise HTTPException(status_code=400, detail="No speaker available for CustomVoice model")
+
+        if loaded_supported_speakers and speaker not in loaded_supported_speakers:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Target voice not supported for this model. Choose from: "
+                    + ", ".join(loaded_supported_speakers)
+                ),
+            )
+
+        kwargs: dict[str, Any] = {
+            "text": request.text,
+            "language": language,
+            "speaker": speaker,
+            "max_new_tokens": MAX_NEW_TOKENS,
         }
-    ]
+        if request.instruct:
+            kwargs["instruct"] = request.instruct
 
+        wavs, sample_rate = qwen_model.generate_custom_voice(**kwargs)
+        return _extract_first_audio(wavs), int(sample_rate)
 
-def _generate_audio(text: str, voice: str) -> np.ndarray:
-    messages = _build_messages(text, voice)
-    input_text = qwen_processor.apply_chat_template(
-        messages, add_generation_prompt=True, tokenize=False
-    )
-    audios, images, videos = process_mm_info(messages, use_audio_in_video=False)
+    if loaded_model_mode == "voice_design":
+        instruct = request.instruct or request.target_voice
+        if not instruct:
+            raise HTTPException(
+                status_code=400,
+                detail="VoiceDesign model requires 'instruct' (or target_voice as description)",
+            )
 
-    inputs = qwen_processor(
-        text=input_text,
-        audio=audios,
-        images=images,
-        videos=videos,
-        return_tensors="pt",
-        padding=True,
-        use_audio_in_video=False,
-    )
-
-    model_device = next(qwen_model.parameters()).device
-    inputs = inputs.to(model_device)
-
-    with torch.inference_mode():
-        output = qwen_model.generate(
-            **inputs,
-            use_audio_in_video=False,
+        wavs, sample_rate = qwen_model.generate_voice_design(
+            text=request.text,
+            language=language,
+            instruct=instruct,
             max_new_tokens=MAX_NEW_TOKENS,
-            do_sample=False,
         )
+        return _extract_first_audio(wavs), int(sample_rate)
 
-    output_ids = output[0][inputs.input_ids.shape[1] :]
-    decoded_audio = qwen_model.audio_tokenizer.decode(
-        output_ids,
-        output.audio_codes[0],
-        output.audio_scales[0],
-        output.audio_logits[0],
-    )
+    if loaded_model_mode == "base":
+        ref_audio, ref_text, resolved_language = _resolve_base_prompt(request)
+        kwargs = {
+            "text": request.text,
+            "language": resolved_language,
+            "ref_audio": ref_audio,
+            "max_new_tokens": MAX_NEW_TOKENS,
+        }
 
-    if isinstance(decoded_audio, torch.Tensor):
-        decoded_audio = decoded_audio.detach().cpu().numpy()
+        if ref_text:
+            kwargs["ref_text"] = ref_text
+        if X_VECTOR_ONLY_MODE:
+            kwargs["x_vector_only_mode"] = True
 
-    return np.asarray(decoded_audio, dtype=np.float32)
+        wavs, sample_rate = qwen_model.generate_voice_clone(**kwargs)
+        return _extract_first_audio(wavs), int(sample_rate)
+
+    raise HTTPException(status_code=500, detail=f"Unsupported model mode: {loaded_model_mode}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global qwen_model, qwen_processor, loaded_model_id
+    global qwen_model, loaded_model_id, loaded_model_mode, loaded_supported_speakers
 
-    candidates = _build_model_candidates(MODEL_ID)
-    if len(candidates) > 1:
-        logger.info(
-            "Model '%s' looks like a Base checkpoint; fallback to '%s' is enabled",
-            candidates[0],
-            candidates[1],
-        )
+    logger.info("Loading Qwen TTS model: %s", MODEL_ID)
+    logger.info("Detected model mode: %s", MODEL_MODE)
 
-    last_error = None
-    for idx, candidate in enumerate(candidates):
-        logger.info("Loading Qwen TTS model: %s", candidate)
-        try:
-            qwen_model, qwen_processor = _load_qwen_model(candidate)
-            loaded_model_id = candidate
-            logger.info("Qwen TTS model loaded successfully: %s", candidate)
-            break
-        except Exception as error:
-            last_error = error
-            is_last_candidate = idx == len(candidates) - 1
-            if is_last_candidate:
-                if "spk_dict.pt" in str(error):
-                    logger.error(
-                        "Model '%s' is incompatible for this API (missing spk_dict.pt). "
-                        "Use an Instruct checkpoint or a compatible local model path.",
-                        candidate,
-                    )
-                logger.exception("Failed to load Qwen TTS model: %s", error)
-            else:
-                logger.warning(
-                    "Failed to load model '%s': %s. Retrying with '%s'",
-                    candidate,
-                    error,
-                    candidates[idx + 1],
-                )
+    try:
+        qwen_model = _load_qwen_model(MODEL_ID)
+        loaded_model_id = MODEL_ID
+        loaded_model_mode = MODEL_MODE
 
-    if not qwen_model or not qwen_processor:
-        raise last_error
+        if loaded_model_mode == "custom_voice" and hasattr(qwen_model, "get_supported_speakers"):
+            speakers = qwen_model.get_supported_speakers()
+            if isinstance(speakers, (list, tuple)):
+                loaded_supported_speakers = [str(item) for item in speakers]
+                logger.info("Loaded %s supported speakers", len(loaded_supported_speakers))
+
+        logger.info("Qwen TTS model loaded successfully")
+    except Exception as error:
+        logger.exception("Failed to load Qwen TTS model: %s", error)
+        raise
 
     yield
 
@@ -269,7 +396,11 @@ app = FastAPI(title="Qwen TTS API", lifespan=lifespan)
 
 class TextOnlyRequest(BaseModel):
     text: str
-    target_voice: str
+    target_voice: str | None = None
+    language: str | None = None
+    instruct: str | None = None
+    ref_audio: str | None = None
+    ref_text: str | None = None
 
 
 @app.post("/generate", dependencies=[Depends(verify_api_key)])
@@ -277,7 +408,7 @@ async def generate_speech(
     request: TextOnlyRequest,
     background_tasks: BackgroundTasks,
 ):
-    if not qwen_model or not qwen_processor:
+    if qwen_model is None:
         raise HTTPException(status_code=500, detail="Model not loaded")
 
     if len(request.text) > MAX_TEXT_LENGTH:
@@ -286,22 +417,13 @@ async def generate_speech(
             detail=f"Text length exceeds the limit of {MAX_TEXT_LENGTH} characters",
         )
 
-    if request.target_voice not in SUPPORTED_VOICES:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Target voice not supported. Choose from: "
-                + ", ".join(SUPPORTED_VOICES)
-            ),
-        )
-
     try:
-        audio = _generate_audio(request.text, request.target_voice)
+        audio, sample_rate = _generate_audio(request)
 
         audio_id = str(uuid.uuid4())
         output_filename = f"{audio_id}.wav"
         local_path = f"/tmp/{output_filename}"
-        sf.write(local_path, audio, samplerate=SAMPLE_RATE)
+        sf.write(local_path, audio, samplerate=sample_rate)
 
         s3_key = f"{S3_PREFIX}/{output_filename}"
         presigned_url = ""
@@ -329,6 +451,8 @@ async def generate_speech(
             "audio_url": presigned_url,
             "s3_key": s3_key,
         }
+    except HTTPException:
+        raise
     except Exception as error:
         logger.exception("Failed to generate Qwen TTS audio: %s", error)
         raise HTTPException(status_code=500, detail="Failed to generate speech")
@@ -336,11 +460,15 @@ async def generate_speech(
 
 @app.get("/voices", dependencies=[Depends(verify_api_key)])
 async def list_voices():
-    return {"voices": SUPPORTED_VOICES}
+    return {"voices": _resolve_supported_voices()}
 
 
 @app.get("/health", dependencies=[Depends(verify_api_key)])
 async def health_check():
-    if qwen_model and qwen_processor:
-        return {"status": "healthy", "model": loaded_model_id or MODEL_ID}
-    return {"status": "unhealthy", "model": "not loaded"}
+    if qwen_model is not None:
+        return {
+            "status": "healthy",
+            "model": loaded_model_id or MODEL_ID,
+            "mode": loaded_model_mode or MODEL_MODE,
+        }
+    return {"status": "unhealthy", "model": "not loaded", "mode": MODEL_MODE}
