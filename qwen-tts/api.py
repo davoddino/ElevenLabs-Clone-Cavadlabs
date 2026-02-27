@@ -13,6 +13,7 @@ import soundfile as sf
 import torch
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from fastapi.security import APIKeyHeader
+from huggingface_hub import snapshot_download
 from pydantic import BaseModel
 from qwen_tts import Qwen3TTSModel
 
@@ -114,17 +115,67 @@ def _detect_model_mode(model_id: str, override: str | None) -> str:
     return "custom_voice"
 
 
+def _resolve_model_path(model_id: str) -> str:
+    local_candidate = Path(model_id)
+    if local_candidate.exists():
+        return str(local_candidate.resolve())
+
+    # Uses Hugging Face default cache location unless HF_HOME/TRANSFORMERS_CACHE is set.
+    return snapshot_download(repo_id=model_id)
+
+
+def _ensure_speech_tokenizer(model_path: str, tokenizer_path: str) -> str:
+    model_dir = Path(model_path)
+    tokenizer_dir = Path(tokenizer_path)
+    speech_tokenizer_dir = model_dir / "speech_tokenizer"
+    required_config = speech_tokenizer_dir / "preprocessor_config.json"
+
+    if speech_tokenizer_dir.is_symlink():
+        if required_config.exists():
+            return str(speech_tokenizer_dir)
+        speech_tokenizer_dir.unlink()
+    elif speech_tokenizer_dir.is_dir():
+        if required_config.exists():
+            return str(speech_tokenizer_dir)
+        shutil.rmtree(speech_tokenizer_dir)
+    elif speech_tokenizer_dir.exists():
+        speech_tokenizer_dir.unlink()
+
+    try:
+        os.symlink(tokenizer_dir, speech_tokenizer_dir, target_is_directory=True)
+    except OSError:
+        shutil.copytree(tokenizer_dir, speech_tokenizer_dir)
+
+    if not required_config.exists():
+        raise RuntimeError(
+            "speech_tokenizer is missing preprocessor_config.json after tokenizer sync"
+        )
+
+    return str(speech_tokenizer_dir)
+
+
 def _load_qwen_model(model_id: str):
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    tokenizer_repo = os.getenv(
+        "QWEN_TTS_TOKENIZER_ID", "Qwen/Qwen3-TTS-Tokenizer-12Hz"
+    )
 
-    model_kwargs: dict[str, Any] = {"dtype": dtype}
+    model_path = _resolve_model_path(model_id)
+    tokenizer_path = snapshot_download(repo_id=tokenizer_repo)
+    speech_tokenizer_path = _ensure_speech_tokenizer(model_path, tokenizer_path)
+
+    logger.info("Resolved model path: %s", model_path)
+    logger.info("Resolved tokenizer path: %s", tokenizer_path)
+    logger.info("Using speech_tokenizer path: %s", speech_tokenizer_path)
+
+    model_kwargs: dict[str, Any] = {"dtype": dtype, "trust_remote_code": True}
     if torch.cuda.is_available():
         model_kwargs["device_map"] = os.getenv("QWEN_TTS_DEVICE_MAP", "cuda:0")
         attn_implementation = os.getenv("QWEN_TTS_ATTN_IMPLEMENTATION")
         if attn_implementation:
             model_kwargs["attn_implementation"] = attn_implementation
 
-    return Qwen3TTSModel.from_pretrained(model_id, **model_kwargs)
+    return Qwen3TTSModel.from_pretrained(model_path, **model_kwargs)
 
 
 def _extract_first_audio(wavs: Any) -> np.ndarray:

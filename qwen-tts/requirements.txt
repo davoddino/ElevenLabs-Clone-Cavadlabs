@@ -4,4 +4,5 @@ boto3==1.40.0
 numpy==1.26.4
 soundfile==0.13.1
 accelerate>=1.0.0
+huggingface_hub>=0.24.0
 git+https://github.com/QwenLM/Qwen3-TTS.git

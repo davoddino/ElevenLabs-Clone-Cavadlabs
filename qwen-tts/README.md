@@ -30,6 +30,7 @@ python main.py
 ```
 
 `api.py` auto-loads `qwen-tts/.env`, so no `export` is required.
+The service uses Hugging Face default cache paths automatically (no manual HF path config needed).
 
 ## Endpoints
 
@@ -62,6 +63,16 @@ The API auto-detects mode from `QWEN_TTS_MODEL_ID` and can be overridden with `Q
 - `...CustomVoice` -> `custom_voice`
 - `...VoiceDesign` -> `voice_design`
 - `...Base` -> `base`
+
+## Tokenizer Auto-Fix
+
+On startup, the API now:
+- downloads the selected model snapshot
+- downloads `Qwen/Qwen3-TTS-Tokenizer-12Hz` (or `QWEN_TTS_TOKENIZER_ID`)
+- ensures `<model_path>/speech_tokenizer` points to a tokenizer folder containing `preprocessor_config.json`
+
+This prevents the common Base-model crash:
+`Can't load feature extractor .../speech_tokenizer ... preprocessor_config.json`.
 
 Example released IDs:
 - `Qwen/Qwen3-TTS-12Hz-1.7B-Base`
@@ -99,6 +110,7 @@ QWEN_TTS_VOICE_CLONE_PRESETS={"Cherry":{"ref_audio":"/path/cherry.wav","ref_text
 - `QWEN_TTS_DEVICE_MAP` (default `cuda:0` when CUDA is available)
 - `QWEN_TTS_ATTN_IMPLEMENTATION` (optional)
 - `QWEN_TTS_X_VECTOR_ONLY_MODE` (Base mode only)
+- `QWEN_TTS_TOKENIZER_ID` (default `Qwen/Qwen3-TTS-Tokenizer-12Hz`)
 
 ## Storage
 
