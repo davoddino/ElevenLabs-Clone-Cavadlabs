@@ -3,6 +3,7 @@ import os
 import shutil
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import boto3
 import numpy as np
@@ -34,6 +35,68 @@ from transformers import AutoProcessor, Qwen2_5OmniForConditionalGeneration
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def _load_local_env_file() -> None:
+    env_path = Path(__file__).with_name(".env")
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+
+        if "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if value and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+
+        os.environ.setdefault(key, value)
+
+
+def _build_model_candidates(model_id: str) -> list[str]:
+    candidates = [model_id]
+    if model_id.endswith("-Base"):
+        candidates.append(f"{model_id[:-5]}-Instruct")
+    return candidates
+
+
+def _load_qwen_model(model_id: str):
+    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    model_kwargs = {}
+    if torch.cuda.is_available():
+        model_kwargs["device_map"] = "auto"
+
+    try:
+        model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
+            model_id,
+            dtype=dtype,
+            **model_kwargs,
+        )
+    except TypeError:
+        model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
+            model_id,
+            torch_dtype=dtype,
+            **model_kwargs,
+        )
+
+    if not torch.cuda.is_available():
+        model = model.to("cpu")
+    model.eval()
+    processor = AutoProcessor.from_pretrained(model_id)
+    return model, processor
+
+
+_load_local_env_file()
+
 API_KEY = os.getenv("API_KEY")
 AUTH_DISABLED = os.getenv("DISABLE_API_KEY_AUTH", "false").lower() == "true"
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").lower()
@@ -53,6 +116,7 @@ SUPPORTED_VOICES = [
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
 qwen_model = None
 qwen_processor = None
+loaded_model_id = None
 
 
 async def verify_api_key(authorization: str = Header(None)):
@@ -155,29 +219,45 @@ def _generate_audio(text: str, voice: str) -> np.ndarray:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global qwen_model, qwen_processor
+    global qwen_model, qwen_processor, loaded_model_id
 
-    logger.info("Loading Qwen TTS model: %s", MODEL_ID)
-    try:
-        model_kwargs = {
-            "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        }
-        if torch.cuda.is_available():
-            model_kwargs["device_map"] = "auto"
-
-        qwen_model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
-            MODEL_ID,
-            **model_kwargs,
+    candidates = _build_model_candidates(MODEL_ID)
+    if len(candidates) > 1:
+        logger.info(
+            "Model '%s' looks like a Base checkpoint; fallback to '%s' is enabled",
+            candidates[0],
+            candidates[1],
         )
-        if not torch.cuda.is_available():
-            qwen_model = qwen_model.to("cpu")
-        qwen_model.eval()
 
-        qwen_processor = AutoProcessor.from_pretrained(MODEL_ID)
-        logger.info("Qwen TTS model loaded successfully")
-    except Exception as error:
-        logger.exception("Failed to load Qwen TTS model: %s", error)
-        raise
+    last_error = None
+    for idx, candidate in enumerate(candidates):
+        logger.info("Loading Qwen TTS model: %s", candidate)
+        try:
+            qwen_model, qwen_processor = _load_qwen_model(candidate)
+            loaded_model_id = candidate
+            logger.info("Qwen TTS model loaded successfully: %s", candidate)
+            break
+        except Exception as error:
+            last_error = error
+            is_last_candidate = idx == len(candidates) - 1
+            if is_last_candidate:
+                if "spk_dict.pt" in str(error):
+                    logger.error(
+                        "Model '%s' is incompatible for this API (missing spk_dict.pt). "
+                        "Use an Instruct checkpoint or a compatible local model path.",
+                        candidate,
+                    )
+                logger.exception("Failed to load Qwen TTS model: %s", error)
+            else:
+                logger.warning(
+                    "Failed to load model '%s': %s. Retrying with '%s'",
+                    candidate,
+                    error,
+                    candidates[idx + 1],
+                )
+
+    if not qwen_model or not qwen_processor:
+        raise last_error
 
     yield
 
@@ -262,5 +342,5 @@ async def list_voices():
 @app.get("/health", dependencies=[Depends(verify_api_key)])
 async def health_check():
     if qwen_model and qwen_processor:
-        return {"status": "healthy", "model": MODEL_ID}
+        return {"status": "healthy", "model": loaded_model_id or MODEL_ID}
     return {"status": "unhealthy", "model": "not loaded"}

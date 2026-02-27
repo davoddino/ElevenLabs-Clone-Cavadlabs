@@ -2,6 +2,26 @@
 
 FastAPI wrapper around local `Qwen/Qwen3-TTS-0.6B` inference.
 
+## Quick start (no Docker)
+
+1. Create `qwen-tts/.env`:
+
+```env
+DISABLE_API_KEY_AUTH=true
+STORAGE_BACKEND=local
+LOCAL_STORAGE_ROOT=/absolute/path/to/local-storage
+QWEN_TTS_MODEL_ID=Qwen/Qwen3-TTS-12Hz-1.7B-Instruct
+QWEN_TTS_PORT=8003
+```
+
+2. Start the API:
+
+```bash
+python main.py
+```
+
+`api.py` auto-loads `qwen-tts/.env`. You can still override values from shell env vars.
+
 ## Endpoints
 
 - `POST /generate`
@@ -30,4 +50,11 @@ When `STORAGE_BACKEND=s3`:
 - `QWEN_TTS_MAX_TEXT_LENGTH` (default `3000`)
 - `QWEN_TTS_MAX_NEW_TOKENS` (default `2048`)
 - `QWEN_TTS_SAMPLE_RATE` (default `24000`)
+- `QWEN_TTS_HOST` (default `0.0.0.0`)
+- `QWEN_TTS_PORT` (default `8003`)
 - `DISABLE_API_KEY_AUTH=true` to disable Authorization checks in local dev
+
+## Model notes
+
+- If `QWEN_TTS_MODEL_ID` ends with `-Base`, the API will automatically try an `-Instruct` fallback.
+- If you see `missing spk_dict.pt`, the selected checkpoint is not compatible with this runtime.
