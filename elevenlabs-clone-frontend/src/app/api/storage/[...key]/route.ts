@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { constants as fsConstants } from "fs";
+import { access, mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { NextRequest } from "next/server";
 import { env } from "~/env";
@@ -52,6 +53,23 @@ const missingStorageRootResponse = () =>
     { status: 500 },
   );
 
+const invalidStorageRootResponse = (message: string) =>
+  Response.json(
+    {
+      error: "LOCAL_STORAGE_ROOT is not accessible",
+      storageRoot: STORAGE_ROOT,
+      detail: message,
+    },
+    { status: 500 },
+  );
+
+const ensureStorageRootAccessible = async () => {
+  if (!STORAGE_ROOT) {
+    throw new Error("LOCAL_STORAGE_ROOT is missing");
+  }
+  await access(STORAGE_ROOT, fsConstants.R_OK | fsConstants.X_OK);
+};
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { key: string[] } },
@@ -61,6 +79,11 @@ export async function GET(
   }
   if (!STORAGE_ROOT) {
     return missingStorageRootResponse();
+  }
+  try {
+    await ensureStorageRootAccessible();
+  } catch (error: any) {
+    return invalidStorageRootResponse(error?.message ?? "unknown error");
   }
 
   try {
@@ -120,6 +143,12 @@ export async function PUT(
   }
   if (!STORAGE_ROOT) {
     return missingStorageRootResponse();
+  }
+  try {
+    // Ensure parent root is reachable before writes.
+    await access(path.dirname(STORAGE_ROOT), fsConstants.W_OK | fsConstants.X_OK);
+  } catch (error: any) {
+    return invalidStorageRootResponse(error?.message ?? "unknown error");
   }
 
   try {
