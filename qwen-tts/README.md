@@ -16,10 +16,8 @@ cp .env.example .env
 DISABLE_API_KEY_AUTH=true
 STORAGE_BACKEND=local
 LOCAL_STORAGE_ROOT=/absolute/path/to/local-storage
-LOCAL_STORAGE_FALLBACK_ROOT=/tmp/elevenlabs-local-storage
 QWEN_TTS_MODEL_ID=Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
 QWEN_TTS_MODEL_MODE=custom_voice
-QWEN_TTS_AUTO_FALLBACK_FROM_BASE=true
 QWEN_TTS_PORT=8003
 ```
 
@@ -56,7 +54,7 @@ Fields used depend on model mode:
 - `voice_design`: uses `instruct` (or falls back to `target_voice` as description)
 - `base`: uses `ref_audio/ref_text` or preset/default reference from env
 
-If `base` is selected but no reference voice is configured, the API can auto-fallback to the matching `CustomVoice` model (`QWEN_TTS_AUTO_FALLBACK_FROM_BASE=true`).
+If `base` is selected and no reference voice is configured, requests fail with `400` by design.
 
 ## Model Modes
 
@@ -109,13 +107,10 @@ QWEN_TTS_VOICE_CLONE_PRESETS={"Cherry":{"ref_audio":"/path/cherry.wav","ref_text
 - `QWEN_TTS_LANGUAGE` (default `Auto`)
 - `QWEN_TTS_HOST` (default `0.0.0.0`)
 - `QWEN_TTS_PORT` (default `8003`)
-- `LOCAL_STORAGE_FALLBACK_ROOT` (default `/tmp/elevenlabs-local-storage`)
 - `QWEN_TTS_DEVICE_MAP` (default `cuda:0` when CUDA is available)
 - `QWEN_TTS_ATTN_IMPLEMENTATION` (optional)
 - `QWEN_TTS_X_VECTOR_ONLY_MODE` (Base mode only)
 - `QWEN_TTS_TOKENIZER_ID` (default `Qwen/Qwen3-TTS-Tokenizer-12Hz`)
-- `QWEN_TTS_AUTO_FALLBACK_FROM_BASE` (default `true`)
-- `QWEN_TTS_ALLOW_UNKNOWN_SPEAKER_FALLBACK` (default `true`)
 
 ## Storage
 
