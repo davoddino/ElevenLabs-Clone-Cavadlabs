@@ -3,8 +3,9 @@ import path from "path";
 import { NextRequest } from "next/server";
 import { env } from "~/env";
 
-const DEFAULT_STORAGE_ROOT = path.resolve(process.cwd(), "../local-storage");
-const STORAGE_ROOT = path.resolve(env.LOCAL_STORAGE_ROOT ?? DEFAULT_STORAGE_ROOT);
+const STORAGE_ROOT = env.LOCAL_STORAGE_ROOT
+  ? path.resolve(env.LOCAL_STORAGE_ROOT)
+  : null;
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   ".wav": "audio/wav",
@@ -15,7 +16,7 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   ".json": "application/json; charset=utf-8",
 };
 
-const resolveStoragePath = (key: string) => {
+const resolveStoragePath = (storageRoot: string, key: string) => {
   const normalized = key
     .split("/")
     .filter(Boolean)
@@ -25,8 +26,8 @@ const resolveStoragePath = (key: string) => {
     throw new Error("Invalid storage key");
   }
 
-  const resolved = path.resolve(STORAGE_ROOT, normalized);
-  if (!(resolved === STORAGE_ROOT || resolved.startsWith(`${STORAGE_ROOT}${path.sep}`))) {
+  const resolved = path.resolve(storageRoot, normalized);
+  if (!(resolved === storageRoot || resolved.startsWith(`${storageRoot}${path.sep}`))) {
     throw new Error("Invalid storage path");
   }
 
@@ -42,6 +43,15 @@ const notLocalResponse = () =>
     { status: 400 },
   );
 
+const missingStorageRootResponse = () =>
+  Response.json(
+    {
+      error:
+        "LOCAL_STORAGE_ROOT is required in frontend env when STORAGE_BACKEND=local",
+    },
+    { status: 500 },
+  );
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { key: string[] } },
@@ -49,11 +59,14 @@ export async function GET(
   if (env.STORAGE_BACKEND !== "local") {
     return notLocalResponse();
   }
+  if (!STORAGE_ROOT) {
+    return missingStorageRootResponse();
+  }
 
   try {
     const awaitedParams = await params;
     const key = decodeKey(awaitedParams.key ?? []);
-    const filePath = resolveStoragePath(key);
+    const filePath = resolveStoragePath(STORAGE_ROOT, key);
     const file = await readFile(filePath);
     const contentType =
       MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ??
@@ -65,8 +78,28 @@ export async function GET(
         "Cache-Control": "public, max-age=3600",
       },
     });
-  } catch {
-    return Response.json({ error: "File not found" }, { status: 404 });
+  } catch (error: any) {
+    const code = error?.code;
+    if (code === "ENOENT") {
+      return Response.json(
+        { error: "File not found", storageRoot: STORAGE_ROOT },
+        { status: 404 },
+      );
+    }
+
+    console.error("Failed to read local storage file", {
+      storageRoot: STORAGE_ROOT,
+      message: error?.message,
+      code,
+    });
+
+    return Response.json(
+      {
+        error: "Failed to read local file",
+        detail: error?.message ?? "unknown error",
+      },
+      { status: 500 },
+    );
   }
 }
 
@@ -77,18 +110,32 @@ export async function PUT(
   if (env.STORAGE_BACKEND !== "local") {
     return notLocalResponse();
   }
+  if (!STORAGE_ROOT) {
+    return missingStorageRootResponse();
+  }
 
   try {
     const awaitedParams = await params;
     const key = decodeKey(awaitedParams.key ?? []);
-    const filePath = resolveStoragePath(key);
+    const filePath = resolveStoragePath(STORAGE_ROOT, key);
     const body = Buffer.from(await request.arrayBuffer());
 
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, body);
 
     return Response.json({ ok: true, key });
-  } catch {
-    return Response.json({ error: "Failed to write file" }, { status: 400 });
+  } catch (error: any) {
+    console.error("Failed to write local storage file", {
+      storageRoot: STORAGE_ROOT,
+      message: error?.message,
+      code: error?.code,
+    });
+    return Response.json(
+      {
+        error: "Failed to write file",
+        detail: error?.message ?? "unknown error",
+      },
+      { status: 400 },
+    );
   }
 }
