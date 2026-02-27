@@ -234,6 +234,9 @@ API_KEY = os.getenv("API_KEY")
 AUTH_DISABLED = os.getenv("DISABLE_API_KEY_AUTH", "false").lower() == "true"
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").lower()
 LOCAL_STORAGE_ROOT = os.getenv("LOCAL_STORAGE_ROOT", "/data/storage")
+LOCAL_STORAGE_FALLBACK_ROOT = os.getenv(
+    "LOCAL_STORAGE_FALLBACK_ROOT", "/tmp/elevenlabs-local-storage"
+)
 MODEL_ID = os.getenv("QWEN_TTS_MODEL_ID", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")
 DEFAULT_LANGUAGE = os.getenv("QWEN_TTS_LANGUAGE", "Auto")
 MAX_TEXT_LENGTH = int(os.getenv("QWEN_TTS_MAX_TEXT_LENGTH", "3000"))
@@ -266,6 +269,7 @@ qwen_model = None
 loaded_model_id = None
 loaded_model_mode = None
 loaded_supported_speakers: list[str] = []
+effective_local_storage_root = LOCAL_STORAGE_ROOT
 
 
 async def verify_api_key(authorization: str = Header(None)):
@@ -306,6 +310,44 @@ s3_client = get_s3_client() if STORAGE_BACKEND == "s3" else None
 
 S3_PREFIX = os.getenv("S3_PREFIX", "qwen-tts-output")
 S3_BUCKET = os.getenv("S3_BUCKET", "elevenlabs-clone")
+
+
+def _can_write_to_dir(root_path: str) -> bool:
+    try:
+        os.makedirs(root_path, exist_ok=True)
+        probe_path = os.path.join(root_path, ".qwen_write_probe")
+        with open(probe_path, "wb") as probe:
+            probe.write(b"ok")
+        os.remove(probe_path)
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_effective_local_storage_root() -> str:
+    candidates = []
+    for candidate in [LOCAL_STORAGE_ROOT, LOCAL_STORAGE_FALLBACK_ROOT]:
+        if candidate:
+            candidates.append(os.path.abspath(candidate))
+
+    seen = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+
+        if _can_write_to_dir(candidate):
+            if candidate != os.path.abspath(LOCAL_STORAGE_ROOT):
+                logger.warning(
+                    "LOCAL_STORAGE_ROOT is not writable. Falling back to: %s",
+                    candidate,
+                )
+            return candidate
+
+    raise RuntimeError(
+        "No writable local storage root. Checked: "
+        + ", ".join(candidates or ["<empty>"])
+    )
 
 
 def _resolve_supported_voices() -> list[str]:
@@ -455,7 +497,7 @@ def _generate_audio(request: "TextOnlyRequest") -> tuple[np.ndarray, int]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global qwen_model, loaded_model_id, loaded_model_mode, loaded_supported_speakers
+    global qwen_model, loaded_model_id, loaded_model_mode, loaded_supported_speakers, effective_local_storage_root
 
     selected_model_id = MODEL_ID
     selected_mode = MODEL_MODE
@@ -484,6 +526,10 @@ async def lifespan(app: FastAPI):
     logger.info("Detected model mode: %s", selected_mode)
 
     try:
+        if STORAGE_BACKEND == "local":
+            effective_local_storage_root = _resolve_effective_local_storage_root()
+            logger.info("Using local storage root: %s", effective_local_storage_root)
+
         qwen_model = _load_qwen_model(selected_model_id)
         loaded_model_id = selected_model_id
         loaded_model_mode = selected_mode
@@ -552,7 +598,7 @@ async def generate_speech(
                 ExpiresIn=3600,
             )
         else:
-            output_dir = os.path.join(LOCAL_STORAGE_ROOT, S3_PREFIX)
+            output_dir = os.path.join(effective_local_storage_root, S3_PREFIX)
             os.makedirs(output_dir, exist_ok=True)
             final_path = os.path.join(output_dir, output_filename)
             shutil.copyfile(local_path, final_path)
@@ -575,7 +621,7 @@ async def generate_speech(
         raise
     except Exception as error:
         logger.exception("Failed to generate Qwen TTS audio: %s", error)
-        raise HTTPException(status_code=500, detail="Failed to generate speech")
+        raise HTTPException(status_code=500, detail=f"Failed to generate speech: {error}")
 
 
 @app.get("/voices", dependencies=[Depends(verify_api_key)])
@@ -590,5 +636,8 @@ async def health_check():
             "status": "healthy",
             "model": loaded_model_id or MODEL_ID,
             "mode": loaded_model_mode or MODEL_MODE,
+            "local_storage_root": effective_local_storage_root
+            if STORAGE_BACKEND == "local"
+            else None,
         }
     return {"status": "unhealthy", "model": "not loaded", "mode": MODEL_MODE}
