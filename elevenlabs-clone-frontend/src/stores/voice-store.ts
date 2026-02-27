@@ -30,21 +30,57 @@ const voices: Voice[] = [
     service: "styletts2",
   },
   {
-    id: "Cherry",
-    name: "Cherry",
+    id: "aiden",
+    name: "Aiden",
     gradientColors: GRADIENT_COLORS[2]!,
     service: "qwen-tts",
   },
   {
-    id: "Chelsie",
-    name: "Chelsie",
+    id: "dylan",
+    name: "Dylan",
     gradientColors: GRADIENT_COLORS[3]!,
     service: "qwen-tts",
   },
   {
-    id: "Ethan",
-    name: "Ethan",
+    id: "eric",
+    name: "Eric",
     gradientColors: GRADIENT_COLORS[4]!,
+    service: "qwen-tts",
+  },
+  {
+    id: "ono_anna",
+    name: "Ono Anna",
+    gradientColors: GRADIENT_COLORS[0]!,
+    service: "qwen-tts",
+  },
+  {
+    id: "ryan",
+    name: "Ryan",
+    gradientColors: GRADIENT_COLORS[1]!,
+    service: "qwen-tts",
+  },
+  {
+    id: "serena",
+    name: "Serena",
+    gradientColors: GRADIENT_COLORS[2]!,
+    service: "qwen-tts",
+  },
+  {
+    id: "sohee",
+    name: "Sohee",
+    gradientColors: GRADIENT_COLORS[3]!,
+    service: "qwen-tts",
+  },
+  {
+    id: "uncle_fu",
+    name: "Uncle Fu",
+    gradientColors: GRADIENT_COLORS[4]!,
+    service: "qwen-tts",
+  },
+  {
+    id: "vivian",
+    name: "Vivian",
+    gradientColors: GRADIENT_COLORS[0]!,
     service: "qwen-tts",
   },
   {
@@ -92,7 +128,20 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     return get().voices.filter((voice) => voice.service === service);
   },
   getSelectedVoice: (service) => {
-    return get().selectedVoices[service];
+    const selected = get().selectedVoices[service];
+    const serviceVoices = get().voices.filter(
+      (voice) => voice.service === service,
+    );
+
+    if (!selected) {
+      return serviceVoices[0] ?? null;
+    }
+
+    const isStillAvailable = serviceVoices.some(
+      (voice) => voice.id === selected.id,
+    );
+
+    return isStillAvailable ? selected : (serviceVoices[0] ?? null);
   },
   selectVoice: (service, voiceId) => {
     const serviceVoices = get().voices.filter(

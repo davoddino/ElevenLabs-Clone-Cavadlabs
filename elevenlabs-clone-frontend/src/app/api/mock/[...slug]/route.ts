@@ -6,7 +6,17 @@ const services = {
     voices: ["andreas", "woman"],
   },
   "qwen-tts": {
-    voices: ["Cherry", "Chelsie", "Ethan"],
+    voices: [
+      "aiden",
+      "dylan",
+      "eric",
+      "ono_anna",
+      "ryan",
+      "serena",
+      "sohee",
+      "uncle_fu",
+      "vivian",
+    ],
   },
   "seed-vc": {
     voices: ["andreas", "woman", "trump"],
