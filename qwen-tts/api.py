@@ -512,6 +512,12 @@ async def generate_speech(
             os.makedirs(output_dir, exist_ok=True)
             final_path = os.path.join(output_dir, output_filename)
             shutil.copyfile(local_path, final_path)
+            logger.info(
+                "Saved local audio file: key=%s path=%s exists=%s",
+                s3_key,
+                final_path,
+                os.path.exists(final_path),
+            )
             presigned_url = f"/api/storage/{s3_key}"
 
         background_tasks.add_task(os.remove, local_path)

@@ -81,8 +81,16 @@ export async function GET(
   } catch (error: any) {
     const code = error?.code;
     if (code === "ENOENT") {
+      const awaitedParams = await params;
+      const key = decodeKey(awaitedParams.key ?? []);
+      const filePath = resolveStoragePath(STORAGE_ROOT, key);
+      console.warn("Local storage file not found", {
+        key,
+        filePath,
+        storageRoot: STORAGE_ROOT,
+      });
       return Response.json(
-        { error: "File not found", storageRoot: STORAGE_ROOT },
+        { error: "File not found", key, filePath, storageRoot: STORAGE_ROOT },
         { status: 404 },
       );
     }
