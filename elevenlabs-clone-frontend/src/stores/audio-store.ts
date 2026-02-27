@@ -64,9 +64,8 @@ export const useAudioStore = create<AudioState>((set, get) => ({
     });
 
     if (audioElement) {
-      setTimeout(() => {
-        audioManager.setAudioSource(audio.audioUrl);
-        audioManager.play()?.catch((err) => {
+      setTimeout(async () => {
+        await audioManager.playFromSource(audio.audioUrl).catch((err) => {
           console.error("Error playing audio: ", err);
           set({ isPlaying: false });
         });
@@ -85,11 +84,19 @@ export const useAudioStore = create<AudioState>((set, get) => ({
       set({ isPlaying: false });
     } else {
       if (!audio.src && get().currentAudio?.audioUrl) {
-        audioManager.setAudioSource(get().currentAudio!.audioUrl);
+        audioManager
+          .playFromSource(get().currentAudio!.audioUrl)
+          .catch((err) => {
+            console.error("Error playing audio: " + err);
+            set({ isPlaying: false });
+          });
+        set({ isPlaying: true });
+        return;
       }
 
       audioManager.play()?.catch((err) => {
         console.error("Error playing audio: " + err);
+        set({ isPlaying: false });
       });
       set({ isPlaying: true });
     }

@@ -1,5 +1,6 @@
 class AudioManager {
   private audioElement: HTMLAudioElement | null = null;
+  private blobObjectUrl: string | null = null;
 
   initialize(): HTMLAudioElement | null {
     if (this.audioElement) return this.audioElement;
@@ -31,6 +32,7 @@ class AudioManager {
 
   setAudioSource(url: string): void {
     if (this.audioElement) {
+      this.clearBlobUrl();
       this.audioElement.src = url;
       this.audioElement.load();
     }
@@ -38,6 +40,48 @@ class AudioManager {
 
   play(): Promise<void> | undefined {
     return this.audioElement?.play();
+  }
+
+  private clearBlobUrl(): void {
+    if (this.blobObjectUrl) {
+      URL.revokeObjectURL(this.blobObjectUrl);
+      this.blobObjectUrl = null;
+    }
+  }
+
+  private async setAudioSourceFromBlob(url: string): Promise<void> {
+    if (!this.audioElement) return;
+
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch audio: ${response.status} ${response.statusText}`);
+    }
+
+    const blob = await response.blob();
+    this.clearBlobUrl();
+    this.blobObjectUrl = URL.createObjectURL(
+      new Blob([blob], { type: "audio/wav" }),
+    );
+    this.audioElement.src = this.blobObjectUrl;
+    this.audioElement.load();
+  }
+
+  async playFromSource(url: string): Promise<void> {
+    if (!this.audioElement) return;
+
+    this.setAudioSource(url);
+    try {
+      await this.audioElement.play();
+      return;
+    } catch (error: any) {
+      const isNotSupported = error?.name === "NotSupportedError";
+      if (!isNotSupported) {
+        throw error;
+      }
+    }
+
+    await this.setAudioSourceFromBlob(url);
+    await this.audioElement.play();
   }
 
   pause(): void {
