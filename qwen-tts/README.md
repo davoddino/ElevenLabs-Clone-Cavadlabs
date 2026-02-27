@@ -16,10 +16,9 @@ cp .env.example .env
 DISABLE_API_KEY_AUTH=true
 STORAGE_BACKEND=local
 LOCAL_STORAGE_ROOT=/absolute/path/to/local-storage
-QWEN_TTS_MODEL_ID=Qwen/Qwen3-TTS-12Hz-1.7B-Base
-QWEN_TTS_MODEL_MODE=base
-QWEN_TTS_BASE_REF_AUDIO=/absolute/path/to/reference_voice.wav
-QWEN_TTS_BASE_REF_TEXT=Hello, this is my reference voice.
+QWEN_TTS_MODEL_ID=Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+QWEN_TTS_MODEL_MODE=custom_voice
+QWEN_TTS_AUTO_FALLBACK_FROM_BASE=true
 QWEN_TTS_PORT=8003
 ```
 
@@ -55,6 +54,8 @@ Fields used depend on model mode:
 - `custom_voice`: uses `target_voice` (speaker id)
 - `voice_design`: uses `instruct` (or falls back to `target_voice` as description)
 - `base`: uses `ref_audio/ref_text` or preset/default reference from env
+
+If `base` is selected but no reference voice is configured, the API can auto-fallback to the matching `CustomVoice` model (`QWEN_TTS_AUTO_FALLBACK_FROM_BASE=true`).
 
 ## Model Modes
 
@@ -111,6 +112,8 @@ QWEN_TTS_VOICE_CLONE_PRESETS={"Cherry":{"ref_audio":"/path/cherry.wav","ref_text
 - `QWEN_TTS_ATTN_IMPLEMENTATION` (optional)
 - `QWEN_TTS_X_VECTOR_ONLY_MODE` (Base mode only)
 - `QWEN_TTS_TOKENIZER_ID` (default `Qwen/Qwen3-TTS-Tokenizer-12Hz`)
+- `QWEN_TTS_AUTO_FALLBACK_FROM_BASE` (default `true`)
+- `QWEN_TTS_ALLOW_UNKNOWN_SPEAKER_FALLBACK` (default `true`)
 
 ## Storage
 

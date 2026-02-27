@@ -115,6 +115,26 @@ def _detect_model_mode(model_id: str, override: str | None) -> str:
     return "custom_voice"
 
 
+def _sibling_model_id(model_id: str, target_mode: str) -> str | None:
+    lower_id = model_id.lower()
+    if lower_id.endswith("-base"):
+        root = model_id[:-5]
+    elif lower_id.endswith("-customvoice"):
+        root = model_id[:-12]
+    elif lower_id.endswith("-voicedesign"):
+        root = model_id[:-12]
+    else:
+        return None
+
+    if target_mode == "base":
+        return f"{root}-Base"
+    if target_mode == "custom_voice":
+        return f"{root}-CustomVoice"
+    if target_mode == "voice_design":
+        return f"{root}-VoiceDesign"
+    return None
+
+
 def _resolve_model_path(model_id: str) -> str:
     local_candidate = Path(model_id)
     if local_candidate.exists():
@@ -229,6 +249,12 @@ BASE_REF_LANGUAGE = os.getenv("QWEN_TTS_BASE_REF_LANGUAGE", DEFAULT_LANGUAGE)
 VOICE_CLONE_PRESETS = _parse_voice_clone_presets(
     os.getenv("QWEN_TTS_VOICE_CLONE_PRESETS")
 )
+AUTO_FALLBACK_FROM_BASE = _as_bool(
+    os.getenv("QWEN_TTS_AUTO_FALLBACK_FROM_BASE"), True
+)
+ALLOW_UNKNOWN_SPEAKER_FALLBACK = _as_bool(
+    os.getenv("QWEN_TTS_ALLOW_UNKNOWN_SPEAKER_FALLBACK"), True
+)
 
 MODEL_MODE = _detect_model_mode(MODEL_ID, os.getenv("QWEN_TTS_MODEL_MODE"))
 
@@ -298,6 +324,10 @@ def _resolve_supported_voices() -> list[str]:
     return DEFAULT_VOICES
 
 
+def _base_reference_configured() -> bool:
+    return bool(BASE_REF_AUDIO) or bool(VOICE_CLONE_PRESETS)
+
+
 def _resolve_base_prompt(request: "TextOnlyRequest") -> tuple[str, str | None, str]:
     language = request.language or BASE_REF_LANGUAGE or DEFAULT_LANGUAGE
 
@@ -358,13 +388,22 @@ def _generate_audio(request: "TextOnlyRequest") -> tuple[np.ndarray, int]:
             raise HTTPException(status_code=400, detail="No speaker available for CustomVoice model")
 
         if loaded_supported_speakers and speaker not in loaded_supported_speakers:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Target voice not supported for this model. Choose from: "
-                    + ", ".join(loaded_supported_speakers)
-                ),
-            )
+            if ALLOW_UNKNOWN_SPEAKER_FALLBACK and loaded_supported_speakers:
+                fallback_speaker = loaded_supported_speakers[0]
+                logger.warning(
+                    "Requested voice '%s' not found; falling back to '%s'",
+                    speaker,
+                    fallback_speaker,
+                )
+                speaker = fallback_speaker
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Target voice not supported for this model. Choose from: "
+                        + ", ".join(loaded_supported_speakers)
+                    ),
+                )
 
         kwargs: dict[str, Any] = {
             "text": request.text,
@@ -418,13 +457,36 @@ def _generate_audio(request: "TextOnlyRequest") -> tuple[np.ndarray, int]:
 async def lifespan(app: FastAPI):
     global qwen_model, loaded_model_id, loaded_model_mode, loaded_supported_speakers
 
-    logger.info("Loading Qwen TTS model: %s", MODEL_ID)
-    logger.info("Detected model mode: %s", MODEL_MODE)
+    selected_model_id = MODEL_ID
+    selected_mode = MODEL_MODE
+
+    if selected_mode == "base" and not _base_reference_configured():
+        if AUTO_FALLBACK_FROM_BASE:
+            fallback_model_id = _sibling_model_id(selected_model_id, "custom_voice")
+            if fallback_model_id:
+                logger.warning(
+                    "Base model selected but no reference voice configured. "
+                    "Falling back to CustomVoice model: %s",
+                    fallback_model_id,
+                )
+                selected_model_id = fallback_model_id
+                selected_mode = "custom_voice"
+            else:
+                logger.warning(
+                    "Base model selected without reference voice. Could not derive a CustomVoice sibling model id."
+                )
+        else:
+            logger.warning(
+                "Base model selected without reference voice and auto fallback is disabled."
+            )
+
+    logger.info("Loading Qwen TTS model: %s", selected_model_id)
+    logger.info("Detected model mode: %s", selected_mode)
 
     try:
-        qwen_model = _load_qwen_model(MODEL_ID)
-        loaded_model_id = MODEL_ID
-        loaded_model_mode = MODEL_MODE
+        qwen_model = _load_qwen_model(selected_model_id)
+        loaded_model_id = selected_model_id
+        loaded_model_mode = selected_mode
 
         if loaded_model_mode == "custom_voice" and hasattr(qwen_model, "get_supported_speakers"):
             speakers = qwen_model.get_supported_speakers()
