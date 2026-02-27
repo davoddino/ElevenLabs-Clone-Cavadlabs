@@ -488,11 +488,18 @@ async def generate_speech(
 
     try:
         audio, sample_rate = _generate_audio(request)
+        audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+        if audio.size == 0:
+            raise RuntimeError("Generated empty audio buffer")
+        if not np.isfinite(audio).all():
+            raise RuntimeError("Generated audio contains non-finite values")
+        audio = np.clip(audio, -1.0, 1.0)
 
         audio_id = str(uuid.uuid4())
         output_filename = f"{audio_id}.wav"
         local_path = f"/tmp/{output_filename}"
-        sf.write(local_path, audio, samplerate=sample_rate)
+        # Force browser-friendly WAV output.
+        sf.write(local_path, audio, samplerate=sample_rate, format="WAV", subtype="PCM_16")
 
         s3_key = f"{S3_PREFIX}/{output_filename}"
         presigned_url = ""
