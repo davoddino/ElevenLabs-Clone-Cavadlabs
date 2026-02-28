@@ -1,167 +1,114 @@
-![Project Thumbnail](thumbnail.png)
+# ElevenLabs Clone
 
-# 🎙️ ElevenLabs Clone – Self-Hosted AI Audio Studio
+Practical local development guide for this monorepo.
 
-## 🚀 Overview
+## Services in this repo
 
-This is a full-stack, self-hosted clone of ElevenLabs — your all-in-one AI audio generation playground. 🔥 Instead of relying on external APIs, we host our own cutting-edge models for:
+- `elevenlabs-clone-frontend`: Next.js app (UI + API routes + Inngest functions)
+- `qwen-tts`: local Qwen3-TTS FastAPI backend
+- `StyleTTS2`, `seed-vc`, `Make-An-Audio`: optional extra backends
 
-- **🔊 Text-to-Speech (TTS)** with **StyleTTS2**
-- **🗣️ Local neural TTS** with **Qwen3-TTS** (optional)
-- **🎭 Voice Conversion** with **Seed-VC**
-- **🎵 Text-to-Audio** with **Make-An-Audio**
+## Quick Start (local, no Docker)
 
-All models are fine-tuned for custom voices, containerized via Docker 🐳, and exposed through blazing-fast FastAPI endpoints ⚡. The frontend is powered by **Next.js** and the **T3 Stack**, offering a modern, responsive UI with voice selection, audio history, and full user management. Auth.js handles authentication, credits are managed dynamically, and Inngest keeps your AI infra from getting overwhelmed 🛡️.
+Use 3 terminals.
 
----
+### 1. Start `qwen-tts` API (terminal 1)
 
-## ✨ Features at a Glance
-
-- 🔊 **StyleTTS2** for lifelike text-to-speech
-- 🗣️ **Qwen3-TTS** for local high-quality TTS
-- 🎭 **Seed-VC** for seamless voice cloning
-- 🎵 **Make-An-Audio** for creative audio generation
-- 🧠 Fine-tuning for unique voice identities
-- 🐳 Dockerized AI stack for easy deployment
-- ⚙️ FastAPI backend with scalable endpoints
-- 🪙 User credit system
-- 🌀 Inngest queue to manage workload
-- ☁️ AWS S3 integration for audio file storage
-- 👥 Multiple pre-trained voice models
-- 🖥️ Fully responsive UI with **Next.js + Tailwind CSS**
-- 🔐 Secure authentication with **Auth.js**
-- 🎛️ Voice picker component
-- 📝 Audio history tracking
-
----
-
-## 🧠 Models Used
-
-| Purpose             | Model Name                                                             |
-| ------------------- | ---------------------------------------------------------------------- |
-| Local TTS (optional)| [`Qwen3-TTS-0.6B`](https://huggingface.co/Qwen/Qwen3-TTS-0.6B)        |
-| Voice-to-Voice      | [`seed-vc`](https://github.com/Plachtaa/seed-vc)                       |
-| Fine-tuned TTS      | [`StyleTTS2FineTune`](https://github.com/IIEleven11/StyleTTS2FineTune) |
-| Text-to-Speech      | [`StyleTTS2`](https://github.com/yl4579/StyleTTS2)                     |
-| Text-to-SFX / Audio | [`Make-an-audio`](https://github.com/Text-to-Audio/Make-An-Audio)      |
-
----
-
-## 🗣️ Local Qwen TTS (No external API)
-
-This repo now includes a `qwen-tts` FastAPI service that runs **fully local inference** (no cloud TTS endpoint).
-
-1. Build and start the service:
 ```bash
-docker compose up -d qwen-tts-api
+cd qwen-tts
+python -m venv ../.venv
+source ../.venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python main.py
 ```
 
-2. Configure frontend `.env`:
-```bash
+Minimal `qwen-tts/.env`:
+
+```env
+DISABLE_API_KEY_AUTH=true
 STORAGE_BACKEND=local
-QWEN_TTS_API_ROUTE=http://localhost:8003
-TTS_DEFAULT_SERVICE=qwen-tts
-# Optional if DISABLE_API_KEY_AUTH=true on backend
-BACKEND_API_KEY=
+LOCAL_STORAGE_ROOT=/absolute/path/to/ElevenLabs-Clone-Cavadlabs/local-storage
+QWEN_TTS_MODEL_ID=Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
+QWEN_TTS_TOKENIZER_ID=Qwen/Qwen3-TTS-Tokenizer-12Hz
+QWEN_TTS_MODEL_MODE=custom_voice
+QWEN_TTS_HOST=0.0.0.0
+QWEN_TTS_PORT=8003
 ```
 
-3. The first startup may download the model weights (`Qwen/Qwen3-TTS-0.6B`) into cache.
-4. In local mode, generated files are written under `./local-storage` (no AWS needed).
+Notes:
 
----
+- First boot downloads model weights from Hugging Face.
+- `QWEN_TTS_MODEL_MODE=base` requires reference audio (`ref_audio`/`ref_text`) by design.
+- If you do not want voice cloning, use `custom_voice` or `voice_design`.
 
-## 🛠️ Setup Instructions
-
-### 1️⃣ Clone the Repository
-
-```bash
-git clone https://github.com/BernieTv/ElevenLabs-Clone.git
-```
-
-### 2️⃣ Navigate to Project Directory
-
-```bash
-cd elevenlabs-clone
-```
-
-### 3️⃣ Install Python 🐍
-
-Ensure Python 3.10 is installed. If not, download it here:  
-👉 [Download Python](https://www.python.org/downloads/)
-
-> **Note:** Create a virtual environment for _each model folder_ except `elevenlabs-clone-frontend`.
-
----
-
-## 📦 Install Dependencies
-
-### ➤ Frontend (Next.js)
+### 2. Start frontend (terminal 2)
 
 ```bash
 cd elevenlabs-clone-frontend
 npm install
+cp .env.example .env
+npm run dev
 ```
 
-### ➤ AI Model Folders (Repeat for each)
+Minimal `elevenlabs-clone-frontend/.env`:
+
+```env
+AUTH_SECRET=replace-with-npx-auth-secret
+DATABASE_URL=file:./db.sqlite
+STORAGE_BACKEND=local
+LOCAL_STORAGE_ROOT=/absolute/path/to/ElevenLabs-Clone-Cavadlabs/local-storage
+QWEN_TTS_API_ROUTE=http://localhost:8003
+TTS_DEFAULT_SERVICE=qwen-tts
+BACKEND_API_KEY=
+```
+
+Critical rule:
+
+- `LOCAL_STORAGE_ROOT` must be the same absolute path in frontend and `qwen-tts`.
+
+### 3. Start Inngest dev server (terminal 3)
 
 ```bash
-cd seed-vc  # example
-pip install -r requirements.txt
+cd elevenlabs-clone-frontend
+npm run inngest-dev
 ```
 
----
+If this process is not running, generation jobs are created but not processed.
 
-## 🔐 AWS IAM Setup
+### 4. Health checks
 
-You'll need two IAM entities to handle S3 and EC2 integration:
-
-### 1️⃣ User: `styletts2-api`
-
-**Purpose:** Upload & fetch audio files from S3
-
-**Custom Policy:**
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["s3:PutObject", "s3:GetObject", "s3:ListBucket"],
-      "Resource": [
-        "arn:aws:s3:::elevenlabs-clone",
-        "arn:aws:s3:::elevenlabs-clone/*"
-      ]
-    }
-  ]
-}
+```bash
+curl -s http://localhost:8003/health
+curl -s http://localhost:8003/voices
 ```
 
----
+Frontend should run on `http://localhost:3000`.
 
-### 2️⃣ Role: `elevenlabs-clone-ec2`
+## Docker (qwen-tts only)
 
-**Purpose:** EC2 access to S3 + ECR
-
-**Attach Permissions:**
-
-- `AmazonEC2ContainerRegistryFullAccess`
-- `AmazonS3FullAccess`
-
-**Custom Policy:**
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["s3:PutObject", "s3:GetObject", "s3:ListBucket"],
-      "Resource": [
-        "arn:aws:s3:::elevenlabs-clone",
-        "arn:aws:s3:::elevenlabs-clone/*"
-      ]
-    }
-  ]
-}
+```bash
+docker compose build --no-cache qwen-tts-api
+docker compose up -d qwen-tts-api
+curl -s http://localhost:8003/health
 ```
+
+`docker-compose.yml` maps host `8003` to container `8000` for `qwen-tts-api`.
+
+## Troubleshooting
+
+### `400 Base model requires a reference voice`
+
+You are using a Base model without `ref_audio`/`ref_text`. Switch to `CustomVoice`/`VoiceDesign`, or configure reference voice env vars for Base mode.
+
+### `400 Target voice not supported`
+
+The voice sent by frontend is not in the model speaker list. Check `GET /voices` and choose one of those names.
+
+### `404 /api/storage/...`
+
+Frontend is looking in a different local folder than the backend wrote to. Align `LOCAL_STORAGE_ROOT` exactly in both `.env` files.
+
+### `Inngest API Error: 401 Event key not found` or stuck jobs
+
+Run `npm run inngest-dev` in `elevenlabs-clone-frontend`.

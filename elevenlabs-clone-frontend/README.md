@@ -1,29 +1,62 @@
-# Create T3 App
+# ElevenLabs Clone Frontend
 
-This is a [T3 Stack](https://create.t3.gg/) project bootstrapped with `create-t3-app`.
+Next.js app used for UI, API routes, and Inngest job execution.
 
-## What's next? How do I make an app with this?
+## Local startup
 
-We try to keep this project as simple as possible, so you can start with just the scaffolding we set up for you, and add additional things later when they become necessary.
+### 1. Install dependencies
 
-If you are not familiar with the different technologies used in this project, please refer to the respective docs. If you still are in the wind, please join our [Discord](https://t3.gg/discord) and ask for help.
+```bash
+npm install
+```
 
-- [Next.js](https://nextjs.org)
-- [NextAuth.js](https://next-auth.js.org)
-- [Prisma](https://prisma.io)
-- [Drizzle](https://orm.drizzle.team)
-- [Tailwind CSS](https://tailwindcss.com)
-- [tRPC](https://trpc.io)
+### 2. Configure `.env`
 
-## Learn More
+```bash
+cp .env.example .env
+```
 
-To learn more about the [T3 Stack](https://create.t3.gg/), take a look at the following resources:
+Minimum required values:
 
-- [Documentation](https://create.t3.gg/)
-- [Learn the T3 Stack](https://create.t3.gg/en/faq#what-learning-resources-are-currently-available) — Check out these awesome tutorials
+```env
+AUTH_SECRET=replace-with-npx-auth-secret
+DATABASE_URL=file:./db.sqlite
+STORAGE_BACKEND=local
+LOCAL_STORAGE_ROOT=/absolute/path/to/ElevenLabs-Clone-Cavadlabs/local-storage
+QWEN_TTS_API_ROUTE=http://localhost:8003
+TTS_DEFAULT_SERVICE=qwen-tts
+BACKEND_API_KEY=
+```
 
-You can check out the [create-t3-app GitHub repository](https://github.com/t3-oss/create-t3-app) — your feedback and contributions are welcome!
+Important:
 
-## How do I deploy this?
+- `LOCAL_STORAGE_ROOT` must match the same absolute path used by `qwen-tts`.
+- If backend auth is enabled, set `BACKEND_API_KEY` to the same value expected by backend.
 
-Follow our deployment guides for [Vercel](https://create.t3.gg/en/deployment/vercel), [Netlify](https://create.t3.gg/en/deployment/netlify) and [Docker](https://create.t3.gg/en/deployment/docker) for more information.
+### 3. Run frontend
+
+```bash
+npm run dev
+```
+
+### 4. Run Inngest worker (separate terminal)
+
+```bash
+npm run inngest-dev
+```
+
+Without this command, TTS generation jobs stay pending or fail in background flow.
+
+## Useful commands
+
+```bash
+npm run typecheck
+npm run lint
+npm run db:push
+npm run db:studio
+```
+
+## Known warnings in dev
+
+- `GET /x/inngest 404`, `/.netlify/functions/inngest 404`, `/.redwood/functions/inngest 404` are expected during Inngest discovery in local dev.
+- Cross-origin warning for `allowedDevOrigins` is a Next.js dev warning and does not block generation.
