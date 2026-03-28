@@ -11,6 +11,7 @@ export async function generateTextToSpeech(
   text: string,
   voice: string,
   service: "styletts2" | "qwen-tts" = "styletts2",
+  modelId?: string,
 ) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -36,6 +37,7 @@ export async function generateTextToSpeech(
     data: {
       audioClipId: audioClipJob.id,
       userId: userId,
+      modelId: modelId,
     },
   });
 

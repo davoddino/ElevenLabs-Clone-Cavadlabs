@@ -1,6 +1,7 @@
 # Qwen TTS Local API
 
 FastAPI wrapper around local Qwen3-TTS inference using the official `qwen_tts.Qwen3TTSModel` runtime.
+It also supports Voxtral models and can auto-start `vllm --omni` when Voxtral is requested.
 
 ## Quick Start (No Docker)
 
@@ -18,6 +19,19 @@ STORAGE_BACKEND=local
 LOCAL_STORAGE_ROOT=/absolute/path/to/local-storage
 QWEN_TTS_MODEL_ID=Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
 QWEN_TTS_MODEL_MODE=custom_voice
+QWEN_TTS_PORT=8003
+```
+
+Voxtral example (`mistralai/Voxtral-4B-TTS-2603`):
+
+```env
+QWEN_TTS_MODEL_ID=Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+# optional override, default is already http://127.0.0.1:8000/v1/audio/speech
+VOXTRAL_TTS_API_ROUTE=http://127.0.0.1:8000/v1/audio/speech
+# optional
+VOXTRAL_TTS_API_KEY=
+VOXTRAL_TTS_RESPONSE_FORMAT=wav
+QWEN_TTS_VOICES=voice_1,voice_2
 QWEN_TTS_PORT=8003
 ```
 
@@ -53,6 +67,11 @@ Fields used depend on model mode:
 - `custom_voice`: uses `target_voice` (speaker id)
 - `voice_design`: uses `instruct` (or falls back to `target_voice` as description)
 - `base`: uses `ref_audio/ref_text` or preset/default reference from env
+- `voxtral_tts`: forwards to `VOXTRAL_TTS_API_ROUTE` with OpenAI-compatible payload (`model`, `input`, `voice`, `response_format`)
+
+Model selection:
+- send `model_id` in `POST /generate`
+- `GET /models` returns built-in options (`Qwen` and `Voxtral`)
 
 If `base` is selected and no reference voice is configured, requests fail with `400` by design.
 
@@ -111,6 +130,9 @@ QWEN_TTS_VOICE_CLONE_PRESETS={"Cherry":{"ref_audio":"/path/cherry.wav","ref_text
 - `QWEN_TTS_ATTN_IMPLEMENTATION` (optional)
 - `QWEN_TTS_X_VECTOR_ONLY_MODE` (Base mode only)
 - `QWEN_TTS_TOKENIZER_ID` (default `Qwen/Qwen3-TTS-Tokenizer-12Hz`)
+- `VOXTRAL_TTS_API_ROUTE` (optional, default `http://127.0.0.1:8000/v1/audio/speech`)
+- `VOXTRAL_TTS_API_KEY` (optional bearer token for proxy endpoint)
+- `VOXTRAL_TTS_RESPONSE_FORMAT` (default `wav`)
 
 ## Storage
 

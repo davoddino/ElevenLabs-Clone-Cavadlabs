@@ -14,7 +14,10 @@ export const aiGenerationFunction = inngest.createFunction(
   },
   { event: "generate.request" },
   async ({ event, step }) => {
-    const { audioClipId } = event.data;
+    const { audioClipId, modelId } = event.data as {
+      audioClipId: string;
+      modelId?: string;
+    };
 
     const audioClip = await step.run("get-clip", async () => {
       return await db.generatedAudioClip.findUniqueOrThrow({
@@ -67,6 +70,7 @@ export const aiGenerationFunction = inngest.createFunction(
           body: JSON.stringify({
             text: audioClip.text,
             target_voice: audioClip.voice,
+            model_id: modelId,
           }),
         });
       } else if (audioClip.service === "seedvc") {

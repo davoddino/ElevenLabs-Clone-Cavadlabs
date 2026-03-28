@@ -84,6 +84,12 @@ const voices: Voice[] = [
     service: "qwen-tts",
   },
   {
+    id: "casual_male",
+    name: "Casual Male (Voxtral)",
+    gradientColors: GRADIENT_COLORS[1]!,
+    service: "qwen-tts",
+  },
+  {
     id: "andreas",
     name: "Andreas",
     gradientColors: GRADIENT_COLORS[0]!,

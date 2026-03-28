@@ -1,7 +1,14 @@
+import base64
+import io
 import json
 import logging
 import os
 import shutil
+import subprocess
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -215,6 +222,11 @@ AUTH_DISABLED = os.getenv("DISABLE_API_KEY_AUTH", "false").lower() == "true"
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").lower()
 LOCAL_STORAGE_ROOT = os.getenv("LOCAL_STORAGE_ROOT", "/data/storage")
 MODEL_ID = os.getenv("QWEN_TTS_MODEL_ID", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")
+VOXTRAL_TTS_API_ROUTE = os.getenv(
+    "VOXTRAL_TTS_API_ROUTE", "http://127.0.0.1:8000/v1/audio/speech"
+).strip()
+VOXTRAL_TTS_API_KEY = os.getenv("VOXTRAL_TTS_API_KEY", "").strip()
+VOXTRAL_RESPONSE_FORMAT = os.getenv("VOXTRAL_TTS_RESPONSE_FORMAT", "wav").strip() or "wav"
 DEFAULT_LANGUAGE = os.getenv("QWEN_TTS_LANGUAGE", "Auto")
 MAX_TEXT_LENGTH = int(os.getenv("QWEN_TTS_MAX_TEXT_LENGTH", "3000"))
 MAX_NEW_TOKENS = int(os.getenv("QWEN_TTS_MAX_NEW_TOKENS", "2048"))
@@ -236,10 +248,215 @@ DEFAULT_VOICES = ["Cherry", "Chelsie", "Ethan", "Serena", "Dylan", "Jada"]
 ENV_VOICES = _parse_voices(os.getenv("QWEN_TTS_VOICES"))
 
 api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
-qwen_model = None
-loaded_model_id = None
-loaded_model_mode = None
-loaded_supported_speakers: list[str] = []
+qwen_models: dict[str, Any] = {}
+qwen_model_modes: dict[str, str] = {}
+qwen_supported_speakers: dict[str, list[str]] = {}
+voxtral_server_process: subprocess.Popen[str] | None = None
+
+
+def _is_voxtral_model(model_id: str) -> bool:
+    return model_id.strip().lower().startswith("mistralai/voxtral")
+
+
+def _resolve_model_id(request_model_id: str | None) -> str:
+    if request_model_id and request_model_id.strip():
+        return request_model_id.strip()
+    return MODEL_ID
+
+
+def _resolve_model_mode_for_id(model_id: str) -> str:
+    if model_id in qwen_model_modes:
+        return qwen_model_modes[model_id]
+    return _detect_model_mode(model_id, os.getenv("QWEN_TTS_MODEL_MODE"))
+
+
+def _ensure_qwen_model_loaded(model_id: str) -> tuple[Any, str, list[str]]:
+    if model_id in qwen_models:
+        return (
+            qwen_models[model_id],
+            qwen_model_modes[model_id],
+            qwen_supported_speakers.get(model_id, []),
+        )
+
+    model_mode = _detect_model_mode(model_id, os.getenv("QWEN_TTS_MODEL_MODE"))
+    model = _load_qwen_model(model_id)
+    speakers: list[str] = []
+
+    if model_mode == "custom_voice" and hasattr(model, "get_supported_speakers"):
+        raw_speakers = model.get_supported_speakers()
+        if isinstance(raw_speakers, (list, tuple)):
+            speakers = [str(item) for item in raw_speakers]
+
+    qwen_models[model_id] = model
+    qwen_model_modes[model_id] = model_mode
+    qwen_supported_speakers[model_id] = speakers
+    logger.info("Loaded Qwen model on demand: %s (mode=%s)", model_id, model_mode)
+    return model, model_mode, speakers
+
+
+def _build_vllm_serve_command(model_id: str, route: str) -> list[str]:
+    parsed = urllib.parse.urlparse(route)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 8000)
+    return ["vllm", "serve", model_id, "--omni", "--host", host, "--port", str(port)]
+
+
+def _voxtral_models_url(route: str) -> str:
+    parsed = urllib.parse.urlparse(route)
+    base_path = parsed.path or "/v1/audio/speech"
+    if "/audio/speech" in base_path:
+        path = base_path.replace("/audio/speech", "/models")
+    else:
+        path = "/v1/models"
+    return urllib.parse.urlunparse(
+        (
+            parsed.scheme or "http",
+            parsed.netloc,
+            path,
+            "",
+            "",
+            "",
+        )
+    )
+
+
+def _is_voxtral_server_reachable(route: str, timeout: float = 2.0) -> bool:
+    probe_url = _voxtral_models_url(route)
+    req = urllib.request.Request(probe_url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def _ensure_voxtral_server_running(model_id: str) -> None:
+    global voxtral_server_process
+
+    if _is_voxtral_server_reachable(VOXTRAL_TTS_API_ROUTE):
+        return
+
+    if voxtral_server_process is None or voxtral_server_process.poll() is not None:
+        if not shutil.which("vllm"):
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Voxtral richiede `vllm` installato. Installa con `pip install -U vllm` "
+                    "e `pip install git+https://github.com/vllm-project/vllm-omni.git --upgrade`."
+                ),
+            )
+
+        cmd = _build_vllm_serve_command(model_id, VOXTRAL_TTS_API_ROUTE)
+        logger.info("Starting vLLM Omni for Voxtral: %s", " ".join(cmd))
+        voxtral_server_process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+    deadline = time.time() + 180
+    while time.time() < deadline:
+        if _is_voxtral_server_reachable(VOXTRAL_TTS_API_ROUTE):
+            logger.info("Voxtral server is reachable")
+            return
+        if voxtral_server_process is not None and voxtral_server_process.poll() is not None:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Il processo vLLM Omni si e' chiuso durante l'avvio. "
+                    "Controlla GPU/CUDA e dipendenze vllm-omni."
+                ),
+            )
+        time.sleep(1.5)
+
+    raise HTTPException(
+        status_code=504,
+        detail="Timeout mentre avviavo vLLM Omni per Voxtral.",
+    )
+
+
+def _parse_voxtral_audio_response(
+    raw_bytes: bytes,
+    content_type: str | None,
+) -> tuple[np.ndarray, int]:
+    if content_type and "application/json" in content_type.lower():
+        payload = json.loads(raw_bytes.decode("utf-8"))
+        audio_b64: str | None = None
+
+        if isinstance(payload, dict):
+            if isinstance(payload.get("audio"), str):
+                audio_b64 = payload["audio"]
+            elif isinstance(payload.get("data"), list) and payload["data"]:
+                first_item = payload["data"][0]
+                if isinstance(first_item, dict):
+                    if isinstance(first_item.get("b64_json"), str):
+                        audio_b64 = first_item["b64_json"]
+                    elif isinstance(first_item.get("audio"), str):
+                        audio_b64 = first_item["audio"]
+
+        if not audio_b64:
+            raise RuntimeError("Voxtral API returned JSON without audio payload")
+
+        raw_bytes = base64.b64decode(audio_b64)
+
+    audio_arr, sample_rate = sf.read(io.BytesIO(raw_bytes), dtype="float32")
+    if isinstance(audio_arr, np.ndarray) and audio_arr.ndim > 1:
+        audio_arr = audio_arr[:, 0]
+    return np.asarray(audio_arr, dtype=np.float32), int(sample_rate)
+
+
+def _generate_voxtral_audio(
+    request: "TextOnlyRequest",
+    model_id: str,
+) -> tuple[np.ndarray, int]:
+    _ensure_voxtral_server_running(model_id)
+
+    payload: dict[str, Any] = {
+        "model": model_id,
+        "input": request.text,
+        "response_format": VOXTRAL_RESPONSE_FORMAT,
+    }
+    if request.target_voice:
+        payload["voice"] = request.target_voice
+
+    if request.instruct:
+        payload["instructions"] = request.instruct
+
+    headers = {"Content-Type": "application/json"}
+    if VOXTRAL_TTS_API_KEY:
+        headers["Authorization"] = f"Bearer {VOXTRAL_TTS_API_KEY}"
+
+    req = urllib.request.Request(
+        VOXTRAL_TTS_API_ROUTE,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as response:
+            raw = response.read()
+            content_type = response.headers.get("Content-Type")
+    except urllib.error.HTTPError as error:
+        error_body = error.read().decode("utf-8", errors="ignore")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Voxtral API error: {error.code} {error_body}",
+        ) from error
+    except urllib.error.URLError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Voxtral API not reachable: {error}",
+        ) from error
+
+    try:
+        return _parse_voxtral_audio_response(raw, content_type)
+    except Exception as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to parse Voxtral audio response: {error}",
+        ) from error
 
 
 async def verify_api_key(authorization: str = Header(None)):
@@ -296,18 +513,24 @@ def _ensure_local_storage_root_writable() -> None:
         ) from error
 
 
-def _resolve_supported_voices() -> list[str]:
-    if loaded_model_mode == "custom_voice" and loaded_supported_speakers:
-        return loaded_supported_speakers
+def _resolve_supported_voices(
+    model_mode: str,
+    supported_speakers: list[str] | None = None,
+) -> list[str]:
+    if model_mode == "custom_voice" and supported_speakers:
+        return supported_speakers
 
-    if loaded_model_mode == "base" and VOICE_CLONE_PRESETS:
+    if model_mode == "base" and VOICE_CLONE_PRESETS:
         return list(VOICE_CLONE_PRESETS.keys())
 
     if ENV_VOICES:
         return ENV_VOICES
 
-    if loaded_model_mode == "voice_design":
+    if model_mode == "voice_design":
         return ["VoiceDesign"]
+
+    if model_mode == "voxtral_tts":
+        return ENV_VOICES or ["casual_male"]
 
     return DEFAULT_VOICES
 
@@ -363,20 +586,29 @@ def _resolve_base_prompt(request: "TextOnlyRequest") -> tuple[str, str | None, s
     )
 
 
-def _generate_audio(request: "TextOnlyRequest") -> tuple[np.ndarray, int]:
+def _generate_audio(
+    request: "TextOnlyRequest",
+    model_id: str,
+) -> tuple[np.ndarray, int]:
     language = request.language or DEFAULT_LANGUAGE
 
-    if loaded_model_mode == "custom_voice":
-        speaker = request.target_voice or (_resolve_supported_voices()[0] if _resolve_supported_voices() else None)
+    if _is_voxtral_model(model_id):
+        return _generate_voxtral_audio(request, model_id)
+
+    qwen_model, model_mode, supported_speakers = _ensure_qwen_model_loaded(model_id)
+
+    if model_mode == "custom_voice":
+        available_voices = _resolve_supported_voices(model_mode, supported_speakers)
+        speaker = request.target_voice or (available_voices[0] if available_voices else None)
         if not speaker:
             raise HTTPException(status_code=400, detail="No speaker available for CustomVoice model")
 
-        if loaded_supported_speakers and speaker not in loaded_supported_speakers:
+        if supported_speakers and speaker not in supported_speakers:
             raise HTTPException(
                 status_code=400,
                 detail=(
                     "Target voice not supported for this model. Choose from: "
-                    + ", ".join(loaded_supported_speakers)
+                    + ", ".join(supported_speakers)
                 ),
             )
 
@@ -392,7 +624,7 @@ def _generate_audio(request: "TextOnlyRequest") -> tuple[np.ndarray, int]:
         wavs, sample_rate = qwen_model.generate_custom_voice(**kwargs)
         return _extract_first_audio(wavs), int(sample_rate)
 
-    if loaded_model_mode == "voice_design":
+    if model_mode == "voice_design":
         instruct = request.instruct or request.target_voice
         if not instruct:
             raise HTTPException(
@@ -408,7 +640,7 @@ def _generate_audio(request: "TextOnlyRequest") -> tuple[np.ndarray, int]:
         )
         return _extract_first_audio(wavs), int(sample_rate)
 
-    if loaded_model_mode == "base":
+    if model_mode == "base":
         ref_audio, ref_text, resolved_language = _resolve_base_prompt(request)
         kwargs = {
             "text": request.text,
@@ -425,37 +657,27 @@ def _generate_audio(request: "TextOnlyRequest") -> tuple[np.ndarray, int]:
         wavs, sample_rate = qwen_model.generate_voice_clone(**kwargs)
         return _extract_first_audio(wavs), int(sample_rate)
 
-    raise HTTPException(status_code=500, detail=f"Unsupported model mode: {loaded_model_mode}")
+    raise HTTPException(status_code=500, detail=f"Unsupported model mode: {model_mode}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global qwen_model, loaded_model_id, loaded_model_mode, loaded_supported_speakers
-
-    logger.info("Loading Qwen TTS model: %s", MODEL_ID)
-    logger.info("Detected model mode: %s", MODEL_MODE)
+    logger.info("Default TTS model: %s", MODEL_ID)
+    logger.info("Default detected mode: %s", MODEL_MODE)
 
     try:
         if STORAGE_BACKEND == "local":
             _ensure_local_storage_root_writable()
             logger.info("Using local storage root: %s", LOCAL_STORAGE_ROOT)
-
-        qwen_model = _load_qwen_model(MODEL_ID)
-        loaded_model_id = MODEL_ID
-        loaded_model_mode = MODEL_MODE
-
-        if loaded_model_mode == "custom_voice" and hasattr(qwen_model, "get_supported_speakers"):
-            speakers = qwen_model.get_supported_speakers()
-            if isinstance(speakers, (list, tuple)):
-                loaded_supported_speakers = [str(item) for item in speakers]
-                logger.info("Loaded %s supported speakers", len(loaded_supported_speakers))
-
-        logger.info("Qwen TTS model loaded successfully")
     except Exception as error:
-        logger.exception("Failed to load Qwen TTS model: %s", error)
+        logger.exception("Failed during API startup: %s", error)
         raise
 
     yield
+
+    if voxtral_server_process is not None and voxtral_server_process.poll() is None:
+        logger.info("Shutting down managed Voxtral server process")
+        voxtral_server_process.terminate()
 
     logger.info("Shutting down Qwen TTS API")
 
@@ -465,6 +687,7 @@ app = FastAPI(title="Qwen TTS API", lifespan=lifespan)
 
 class TextOnlyRequest(BaseModel):
     text: str
+    model_id: str | None = None
     target_voice: str | None = None
     language: str | None = None
     instruct: str | None = None
@@ -477,17 +700,16 @@ async def generate_speech(
     request: TextOnlyRequest,
     background_tasks: BackgroundTasks,
 ):
-    if qwen_model is None:
-        raise HTTPException(status_code=500, detail="Model not loaded")
-
     if len(request.text) > MAX_TEXT_LENGTH:
         raise HTTPException(
             status_code=400,
             detail=f"Text length exceeds the limit of {MAX_TEXT_LENGTH} characters",
         )
 
+    resolved_model_id = _resolve_model_id(request.model_id)
+
     try:
-        audio, sample_rate = _generate_audio(request)
+        audio, sample_rate = _generate_audio(request, resolved_model_id)
         audio = np.asarray(audio, dtype=np.float32).reshape(-1)
         if audio.size == 0:
             raise RuntimeError("Generated empty audio buffer")
@@ -539,7 +761,7 @@ async def generate_speech(
             error.status_code,
             getattr(error, "detail", ""),
             request.target_voice,
-            loaded_model_mode or MODEL_MODE,
+            _resolve_model_mode_for_id(resolved_model_id),
         )
         raise
     except Exception as error:
@@ -548,17 +770,40 @@ async def generate_speech(
 
 
 @app.get("/voices", dependencies=[Depends(verify_api_key)])
-async def list_voices():
-    return {"voices": _resolve_supported_voices()}
+async def list_voices(model_id: str | None = None):
+    resolved_model_id = _resolve_model_id(model_id)
+    if _is_voxtral_model(resolved_model_id):
+        return {"voices": _resolve_supported_voices("voxtral_tts")}
+
+    _, model_mode, speakers = _ensure_qwen_model_loaded(resolved_model_id)
+    return {"voices": _resolve_supported_voices(model_mode, speakers)}
 
 
 @app.get("/health", dependencies=[Depends(verify_api_key)])
 async def health_check():
-    if qwen_model is not None:
-        return {
-            "status": "healthy",
-            "model": loaded_model_id or MODEL_ID,
-            "mode": loaded_model_mode or MODEL_MODE,
-            "local_storage_root": LOCAL_STORAGE_ROOT if STORAGE_BACKEND == "local" else None,
-        }
-    return {"status": "unhealthy", "model": "not loaded", "mode": MODEL_MODE}
+    return {
+        "status": "healthy",
+        "default_model": MODEL_ID,
+        "default_mode": _resolve_model_mode_for_id(MODEL_ID),
+        "loaded_qwen_models": list(qwen_models.keys()),
+        "voxtral_route": VOXTRAL_TTS_API_ROUTE,
+        "local_storage_root": LOCAL_STORAGE_ROOT if STORAGE_BACKEND == "local" else None,
+    }
+
+
+@app.get("/models", dependencies=[Depends(verify_api_key)])
+async def list_models():
+    return {
+        "models": [
+            {
+                "id": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+                "mode": "custom_voice",
+                "provider": "qwen",
+            },
+            {
+                "id": "mistralai/Voxtral-4B-TTS-2603",
+                "mode": "voxtral_tts",
+                "provider": "mistral",
+            },
+        ]
+    }

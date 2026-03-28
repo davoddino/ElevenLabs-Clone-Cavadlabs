@@ -36,11 +36,24 @@ QWEN_TTS_HOST=0.0.0.0
 QWEN_TTS_PORT=8003
 ```
 
+To test Voxtral instead (optional override):
+
+```env
+VOXTRAL_TTS_API_ROUTE=http://127.0.0.1:8000/v1/audio/speech
+# optional
+VOXTRAL_TTS_API_KEY=
+VOXTRAL_TTS_RESPONSE_FORMAT=wav
+# optional, to match your frontend dropdown
+QWEN_TTS_VOICES=voice_1,voice_2
+```
+
 Notes:
 
 - First boot downloads model weights from Hugging Face.
 - `QWEN_TTS_MODEL_MODE=base` requires reference audio (`ref_audio`/`ref_text`) by design.
 - If you do not want voice cloning, use `custom_voice` or `voice_design`.
+- To use Voxtral, send `model_id: "mistralai/Voxtral-4B-TTS-2603"` in `/generate`.
+- If `vllm` + `vllm-omni` are installed, the API can auto-start the Voxtral server on first request.
 
 ### 2. Start frontend (terminal 2)
 

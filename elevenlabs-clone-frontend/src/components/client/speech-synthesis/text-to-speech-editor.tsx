@@ -20,6 +20,7 @@ import {
 import { useVoiceStore } from "~/stores/voice-store";
 import { useAudioStore } from "~/stores/audio-store";
 import toast from "react-hot-toast";
+import { useModelStore } from "~/stores/model-store";
 
 export function TextToSpeechEditor({
   service,
@@ -35,8 +36,12 @@ export function TextToSpeechEditor({
   );
   const [loading, setLoading] = useState(false);
   const [currentAudioId, setCurrentAudioId] = useState<string | null>(null);
+  const [lastRequestedVoiceId, setLastRequestedVoiceId] = useState<string | null>(null);
 
   const getSelectedVoice = useVoiceStore((state) => state.getSelectedVoice);
+  const getSelectedModelForService = useModelStore(
+    (state) => state.getSelectedModelForService,
+  );
 
   const { playAudio } = useAudioStore();
 
@@ -58,7 +63,7 @@ export function TextToSpeechEditor({
               textContent.substring(0, 50) +
               (textContent.length > 50 ? "..." : ""),
             audioUrl: status.audioUrl,
-            voice: selectedVoice.id,
+            voice: lastRequestedVoiceId || selectedVoice.id,
             duration: "0:30",
             progress: 0,
             service: service,
@@ -67,10 +72,12 @@ export function TextToSpeechEditor({
 
           playAudio(newAudio);
           setCurrentAudioId(null);
+          setLastRequestedVoiceId(null);
         } else if (!status.success) {
           clearInterval(pollInterval);
           setLoading(false);
           setCurrentAudioId(null);
+          setLastRequestedVoiceId(null);
           console.error("Text to speech failed");
         }
       } catch (error) {
@@ -78,6 +85,7 @@ export function TextToSpeechEditor({
         clearInterval(pollInterval);
         setLoading(false);
         setCurrentAudioId(null);
+        setLastRequestedVoiceId(null);
       }
     }, 500);
 
@@ -91,6 +99,7 @@ export function TextToSpeechEditor({
     playAudio,
     textContent,
     service,
+    lastRequestedVoiceId,
   ]);
 
   const templateTexts = {
@@ -122,15 +131,24 @@ export function TextToSpeechEditor({
 
   const handleGenerateSpeech = async () => {
     const selectedVoice = getSelectedVoice(service);
+    const selectedModel = getSelectedModelForService(service);
 
     if (textContent.trim().length === 0 || !selectedVoice) return;
 
     try {
       setLoading(true);
+      const isVoxtral =
+        service === "qwen-tts" &&
+        !!selectedModel?.id &&
+        selectedModel.id.toLowerCase().startsWith("mistralai/voxtral");
+      const targetVoice = isVoxtral ? "casual_male" : selectedVoice.id;
+      setLastRequestedVoiceId(targetVoice);
+
       const { audioId, shouldShowThrottleAlert } = await generateTextToSpeech(
         textContent,
-        selectedVoice?.id,
+        targetVoice,
         service === "qwen-tts" ? "qwen-tts" : "styletts2",
+        selectedModel?.id,
       );
 
       if (shouldShowThrottleAlert) {

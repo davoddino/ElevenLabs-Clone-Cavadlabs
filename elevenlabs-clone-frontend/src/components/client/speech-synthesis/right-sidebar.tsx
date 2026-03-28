@@ -7,6 +7,7 @@ import { HistoryPanel } from "./history-panel";
 import { useState } from "react";
 import { HistoryItem } from "~/lib/history";
 import { IoClose } from "react-icons/io5";
+import { ModelSelector } from "../model-selector";
 
 export function SpeechSidebar({
   service,
@@ -47,6 +48,13 @@ export function SpeechSidebar({
         <div className="transition-opacity duration-200">
           {activeTab === "settings" ? (
             <div className="mb-6">
+              {service === "qwen-tts" && (
+                <>
+                  <h2 className="mb-2 text-sm">Model</h2>
+                  <ModelSelector service={service} />
+                </>
+              )}
+              {service === "qwen-tts" && <div className="mb-4" />}
               <h2 className="mb-2 text-sm">Voice</h2>
               <VoiceSelector service={service} />
             </div>
@@ -102,6 +110,13 @@ export function SpeechSidebar({
           <div className="transition-opacity duration-200">
             {activeTab === "settings" ? (
               <div className="mb-6">
+                {service === "qwen-tts" && (
+                  <>
+                    <h2 className="mb-2 text-sm">Model</h2>
+                    <ModelSelector service={service} />
+                  </>
+                )}
+                {service === "qwen-tts" && <div className="mb-4" />}
                 <h2 className="mb-2 text-sm">Voice</h2>
                 <VoiceSelector service={service} />
               </div>
